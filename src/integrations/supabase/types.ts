@@ -14,28 +14,67 @@ export type Database = {
   }
   public: {
     Tables: {
-      event_registrations: {
+      events: {
         Row: {
-          event_id: string
+          created_at: string | null
+          date: string
           id: string
-          registered_at: string
-          user_id: string
+          location: string
+          name: string
         }
         Insert: {
-          event_id: string
+          created_at?: string | null
+          date: string
           id?: string
-          registered_at?: string
-          user_id: string
+          location: string
+          name: string
         }
         Update: {
+          created_at?: string | null
+          date?: string
+          id?: string
+          location?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      participants: {
+        Row: {
+          checked_in: boolean | null
+          checked_in_at: string | null
+          created_at: string | null
+          email: string | null
+          event_id: string
+          id: string
+          name: string
+          phone: string | null
+          qr_token: string
+        }
+        Insert: {
+          checked_in?: boolean | null
+          checked_in_at?: string | null
+          created_at?: string | null
+          email?: string | null
+          event_id: string
+          id?: string
+          name: string
+          phone?: string | null
+          qr_token: string
+        }
+        Update: {
+          checked_in?: boolean | null
+          checked_in_at?: string | null
+          created_at?: string | null
+          email?: string | null
           event_id?: string
           id?: string
-          registered_at?: string
-          user_id?: string
+          name?: string
+          phone?: string | null
+          qr_token?: string
         }
         Relationships: [
           {
-            foreignKeyName: "event_registrations_event_id_fkey"
+            foreignKeyName: "participants_event_id_fkey"
             columns: ["event_id"]
             isOneToOne: false
             referencedRelation: "events"
@@ -43,105 +82,56 @@ export type Database = {
           },
         ]
       }
-      events: {
+      users: {
         Row: {
-          address: string
-          background_image_url: string
-          created_by: string
-          creator: string
-          date: string
-          description: string
-          id: string
-          target_date: string
-          time: string
-          title: string
-        }
-        Insert: {
-          address: string
-          background_image_url: string
-          created_by?: string
-          creator: string
-          date: string
-          description: string
-          id?: string
-          target_date: string
-          time: string
-          title: string
-        }
-        Update: {
-          address?: string
-          background_image_url?: string
-          created_by?: string
-          creator?: string
-          date?: string
-          description?: string
-          id?: string
-          target_date?: string
-          time?: string
-          title?: string
-        }
-        Relationships: []
-      }
-      profiles: {
-        Row: {
-          created_at: string
-          display_name: string | null
-          id: string
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          created_at?: string
-          display_name?: string | null
-          id?: string
-          updated_at?: string
-          user_id: string
-        }
-        Update: {
-          created_at?: string
-          display_name?: string | null
-          id?: string
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: []
-      }
-      user_roles: {
-        Row: {
+          approval_status: string
+          assigned_event_id: string | null
           created_at: string | null
+          full_name: string
           id: string
-          role: Database["public"]["Enums"]["app_role"]
-          user_id: string
+          role: string
         }
         Insert: {
+          approval_status?: string
+          assigned_event_id?: string | null
           created_at?: string | null
-          id?: string
-          role: Database["public"]["Enums"]["app_role"]
-          user_id: string
+          full_name: string
+          id: string
+          role?: string
         }
         Update: {
+          approval_status?: string
+          assigned_event_id?: string | null
           created_at?: string | null
+          full_name?: string
           id?: string
-          role?: Database["public"]["Enums"]["app_role"]
-          user_id?: string
+          role?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "users_assigned_event_id_fkey"
+            columns: ["assigned_event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      has_role: {
-        Args: {
-          _role: Database["public"]["Enums"]["app_role"]
-          _user_id: string
-        }
-        Returns: boolean
+      checkin_participant: {
+        Args: { _event_id: string; _participant_id: string; _qr_token: string }
+        Returns: Json
       }
+      get_user_approval_status: { Args: { _user_id: string }; Returns: string }
+      get_user_assigned_event: { Args: { _user_id: string }; Returns: string }
+      get_user_role: { Args: { _user_id: string }; Returns: string }
     }
     Enums: {
-      app_role: "admin" | "user"
+      [_ in never]: never
     }
     CompositeTypes: {
       [_ in never]: never
@@ -268,8 +258,6 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {
-      app_role: ["admin", "user"],
-    },
+    Enums: {},
   },
 } as const
