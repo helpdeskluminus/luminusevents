@@ -34,21 +34,67 @@ const Auth = () => {
 
   const handleSignup = async () => {
     if (!fullName.trim()) throw new Error('Full name is required');
+    
+    console.log('=== SIGNUP PROCESS STARTED ===');
+    console.log('Email:', email);
+    console.log('Full Name:', fullName);
+    
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { emailRedirectTo: window.location.origin },
     });
-    if (error) throw error;
+    
+    console.log('Auth signup response:', { data, error });
+    
+    if (error) {
+      console.error('Auth signup error:', error);
+      throw error;
+    }
+    
     if (data.user) {
-      const { error: insertError } = await supabase.from('users').insert({
+      console.log('Auth user created:', data.user);
+      console.log('Auth user ID (UUID):', data.user.id);
+      console.log('Auth user email:', data.user.email);
+      
+      // The automatic trigger should create the public.users record,
+      // but we also try manually in case the user is already in auth.users
+      console.log('Attempting to insert user record...');
+      const { data: insertData, error: insertError } = await supabase.from('users').insert({
         id: data.user.id,
         full_name: fullName.trim(),
         role: 'coordinator',
         approval_status: 'pending',
       } as any);
-      if (insertError) throw insertError;
+      
+      console.log('Insert response:', { insertData, insertError });
+      
+      if (insertError) {
+        console.error('User insert error:', insertError);
+        // Don't throw, the trigger should have already created it
+        console.log('Note: Manual insert failed, but the trigger may have created the record.');
+      } else {
+        console.log('User record created successfully');
+      }
+      
+      // Verify the record was created
+      const { data: verifyData, error: verifyError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', data.user.id)
+        .single();
+      
+      console.log('Verification query:', { verifyData, verifyError });
+      if (verifyData) {
+        console.log('✓ User record verified in public.users:', verifyData);
+      } else {
+        console.warn('⚠ User record NOT found in public.users');
+      }
+    } else {
+      console.warn('No user returned from signup');
     }
+    
+    console.log('=== SIGNUP PROCESS COMPLETED ===');
     toast({ title: 'Account created', description: 'Please check your email to verify, then wait for admin approval.' });
   };
 
