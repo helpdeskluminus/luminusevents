@@ -1,0 +1,8 @@
+{
+  "appName": "Luminus-Checkin",
+  "version": "1.0.0",
+  "roles": ["admin", "coordinator"],
+  "approvalRequired": true,
+  "qrValidation": true,
+  "deployment": "vercel"
+}

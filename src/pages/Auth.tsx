@@ -4,128 +4,137 @@ import { supabase } from '@/integrations/supabase/client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { SEOHead } from '@/components/SEOHead';
+import { config } from '@/lib/config';
+
+type Mode = 'login' | 'signup' | 'forgot';
 
 const Auth = () => {
+  const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isLogin, setIsLogin] = useState(true);
+  const [fullName, setFullName] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
   useEffect(() => {
-    // Check if user is already logged in
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) navigate('/');
+    });
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        navigate('/admin');
-      }
+      if (session) navigate('/');
     });
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session) {
-        navigate('/admin');
-      }
-    });
-
     return () => subscription.unsubscribe();
   }, [navigate]);
+
+  const handleLogin = async () => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+  };
+
+  const handleSignup = async () => {
+    if (!fullName.trim()) throw new Error('Full name is required');
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: window.location.origin },
+    });
+    if (error) throw error;
+    if (data.user) {
+      const { error: insertError } = await supabase.from('users').insert({
+        id: data.user.id,
+        full_name: fullName.trim(),
+        role: 'coordinator',
+        approval_status: 'pending',
+      } as any);
+      if (insertError) throw insertError;
+    }
+    toast({ title: 'Account created', description: 'Please check your email to verify, then wait for admin approval.' });
+  };
+
+  const handleForgotPassword = async () => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (error) throw error;
+    toast({ title: 'Email sent', description: 'Check your inbox for the password reset link.' });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-
     try {
-      if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (error) throw error;
-
-        toast({
-          title: 'Success',
-          description: 'Logged in successfully',
-        });
-      } else {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/admin`,
-          },
-        });
-
-        if (error) throw error;
-
-        toast({
-          title: 'Success',
-          description: 'Account created successfully',
-        });
-      }
+      if (mode === 'login') await handleLogin();
+      else if (mode === 'signup') await handleSignup();
+      else await handleForgotPassword();
     } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-white px-4">
-      <SEOHead 
-        title={isLogin ? 'Sign In' : 'Sign Up'}
-        description={isLogin ? 'Sign in to manage your events and registrations' : 'Create an account to manage events and register for upcoming events'}
-      />
-      <div className="w-full max-w-md space-y-8">
-        <div>
-          <h2 className="text-4xl font-normal text-[#1A1A1A] tracking-[-0.02em]">
-            {isLogin ? 'Sign In' : 'Sign Up'}
-          </h2>
-          <p className="mt-2 text-sm text-[#1A1A1A] opacity-50">
-            {isLogin ? 'Sign in to manage events' : 'Create an account to manage events'}
+    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+      <div className="w-full max-w-sm space-y-8">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold text-foreground tracking-tight">{config.appName}</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {mode === 'login' && 'Sign in to your account'}
+            {mode === 'signup' && 'Create a new account'}
+            {mode === 'forgot' && 'Reset your password'}
           </p>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {mode === 'signup' && (
             <Input
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Full Name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
               required
-              className="border-[#1A1A1A] text-[#1A1A1A]"
+              className="bg-secondary border-border text-foreground"
             />
-          </div>
-          <div>
+          )}
+          <Input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className="bg-secondary border-border text-foreground"
+          />
+          {mode !== 'forgot' && (
             <Input
               type="password"
               placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="border-[#1A1A1A] text-[#1A1A1A]"
+              minLength={6}
+              className="bg-secondary border-border text-foreground"
             />
-          </div>
-          <Button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-[#1A1A1A] text-white hover:bg-opacity-90"
-          >
-            {loading ? 'Loading...' : isLogin ? 'Sign In' : 'Sign Up'}
+          )}
+          <Button type="submit" disabled={loading} className="w-full">
+            {loading ? 'Please wait...' : mode === 'login' ? 'Sign In' : mode === 'signup' ? 'Create Account' : 'Send Reset Link'}
           </Button>
         </form>
-        <button
-          onClick={() => setIsLogin(!isLogin)}
-          className="text-sm text-[#1A1A1A] hover:opacity-70 transition-opacity"
-        >
-          {isLogin ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
-        </button>
+        <div className="flex flex-col items-center gap-2 text-sm">
+          {mode === 'login' && (
+            <>
+              <button onClick={() => setMode('forgot')} className="text-muted-foreground hover:text-foreground transition-colors">
+                Forgot password?
+              </button>
+              <button onClick={() => setMode('signup')} className="text-muted-foreground hover:text-foreground transition-colors">
+                Don't have an account? Sign up
+              </button>
+            </>
+          )}
+          {mode !== 'login' && (
+            <button onClick={() => setMode('login')} className="text-muted-foreground hover:text-foreground transition-colors">
+              Back to sign in
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
