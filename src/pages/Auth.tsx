@@ -65,7 +65,7 @@ const Auth = () => {
         full_name: fullName.trim(),
         role: 'coordinator',
         approval_status: 'pending',
-      } as any);
+      });
       
       console.log('Insert response:', { insertData, insertError });
       
@@ -113,8 +113,9 @@ const Auth = () => {
       if (mode === 'login') await handleLogin();
       else if (mode === 'signup') await handleSignup();
       else await handleForgotPassword();
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      toast({ title: 'Error', description: errorMessage, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
