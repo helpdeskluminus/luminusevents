@@ -8,6 +8,11 @@ import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScanLine, Users, BarChart3 } from 'lucide-react';
 
+interface Html5Qrcode {
+  start(config: unknown, videoConstraints: unknown, onScan: (text: string) => void, onError: () => void): Promise<void>;
+  stop(): Promise<void>;
+}
+
 interface Event {
   id: string;
   name: string;
@@ -35,7 +40,7 @@ const CoordinatorDashboard = () => {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<{ success: boolean; message: string; name?: string } | null>(null);
-  const scannerRef = useRef<any>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
   const scannerContainerId = 'qr-reader';
 
   useEffect(() => {
@@ -113,7 +118,7 @@ const CoordinatorDashboard = () => {
             if (error) {
               setScanResult({ success: false, message: error.message });
             } else {
-              const result = data as any;
+              const result = data as { success: boolean; error?: string; name?: string };
               if (result.success) {
                 setScanResult({ success: true, message: 'Check-in successful!', name: result.name });
                 toast({ title: '✓ Checked In', description: result.name });
@@ -126,17 +131,24 @@ const CoordinatorDashboard = () => {
             setScanResult({ success: false, message: 'Invalid QR code' });
           }
         },
-        () => {} // ignore scan errors
+        () => {
+          // ignore scan errors
+        }
       );
-    } catch (err: any) {
-      toast({ title: 'Camera Error', description: err.message || 'Could not access camera', variant: 'destructive' });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Could not access camera';
+      toast({ title: 'Camera Error', description: errMsg, variant: 'destructive' });
       setScanning(false);
     }
   };
 
   const stopScanner = async () => {
     if (scannerRef.current) {
-      try { await scannerRef.current.stop(); } catch {}
+      try {
+        await scannerRef.current.stop();
+      } catch {
+        // ignore stop errors
+      }
       scannerRef.current = null;
     }
     setScanning(false);
@@ -145,7 +157,11 @@ const CoordinatorDashboard = () => {
   useEffect(() => {
     return () => {
       if (scannerRef.current) {
-        try { scannerRef.current.stop(); } catch {}
+        try {
+          scannerRef.current.stop();
+        } catch {
+          // ignore cleanup errors
+        }
       }
     };
   }, []);

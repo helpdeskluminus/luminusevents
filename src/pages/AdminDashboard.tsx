@@ -101,7 +101,7 @@ const AdminDashboard = () => {
     e.preventDefault();
     const { error } = await supabase.from('events').insert({
       name: eventName, date: eventDate, location: eventLocation,
-    } as any);
+    });
     if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
     toast({ title: 'Event created' });
     setEventName(''); setEventDate(''); setEventLocation('');
@@ -116,13 +116,13 @@ const AdminDashboard = () => {
   };
 
   const updateUserApproval = async (userId: string, status: string) => {
-    const { error } = await supabase.from('users').update({ approval_status: status } as any).eq('id', userId);
+    const { error } = await supabase.from('users').update({ approval_status: status }).eq('id', userId);
     if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
     fetchUsers();
   };
 
   const assignEvent = async (userId: string, eventId: string | null) => {
-    const { error } = await supabase.from('users').update({ assigned_event_id: eventId } as any).eq('id', userId);
+    const { error } = await supabase.from('users').update({ assigned_event_id: eventId }).eq('id', userId);
     if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
     fetchUsers();
   };
@@ -154,7 +154,7 @@ const AdminDashboard = () => {
     // Batch insert in chunks of 500
     for (let i = 0; i < rows.length; i += 500) {
       const chunk = rows.slice(i, i + 500);
-      const { error } = await supabase.from('participants').insert(chunk as any);
+      const { error } = await supabase.from('participants').insert(chunk);
       if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
     }
     toast({ title: 'Success', description: `${rows.length} participants imported` });
