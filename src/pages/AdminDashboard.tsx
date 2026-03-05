@@ -9,6 +9,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CalendarDays, Users, UserCheck, BarChart3, Upload, Download, QrCode } from 'lucide-react';
 import QRCode from 'qrcode';
+import * as XLSX from 'xlsx';
 
 interface Event {
   id: string;
@@ -40,7 +41,7 @@ interface Participant {
 }
 
 const AdminDashboard = () => {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, signOut } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -55,9 +56,9 @@ const AdminDashboard = () => {
   const [eventLocation, setEventLocation] = useState('');
 
   useEffect(() => {
-    if (!loading && (!user || !profile)) navigate('/auth', { replace: true });
-    if (!loading && profile && profile.role !== 'admin') navigate('/', { replace: true });
-    if (!loading && profile && profile.approval_status !== 'approved') navigate('/pending', { replace: true });
+    if (!loading && !user) navigate('/auth', { replace: true });
+    if (!loading && user && profile && profile.role !== 'admin') navigate('/', { replace: true });
+    if (!loading && user && profile && profile.approval_status !== 'approved') navigate('/pending', { replace: true });
   }, [user, profile, loading, navigate]);
 
   const fetchEvents = useCallback(async () => {
@@ -127,39 +128,111 @@ const AdminDashboard = () => {
     fetchUsers();
   };
 
-  const handleCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const buildParticipantKey = (name: string, email?: string | null, phone?: string | null) => {
+    return `${name.trim().toLowerCase()}|${(email || '').trim().toLowerCase()}|${(phone || '').trim().toLowerCase()}`;
+  };
+
+  const parseParticipantRowsFromFile = async (file: File) => {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: 'array' });
+    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+
+    if (!firstSheet) {
+      throw new Error('Could not read file contents');
+    }
+
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: '' });
+    if (!rows.length) {
+      throw new Error('File must contain a header row and at least one participant row');
+    }
+
+    const headerMap = new Map<string, string>();
+    Object.keys(rows[0]).forEach((key) => {
+      headerMap.set(key.trim().toLowerCase(), key);
+    });
+
+    const nameHeader = headerMap.get('name');
+    const emailHeader = headerMap.get('email');
+    const phoneHeader = headerMap.get('phone');
+
+    if (!nameHeader) {
+      throw new Error('File must include a "name" column');
+    }
+
+    return rows
+      .map((row) => ({
+        name: String(row[nameHeader] ?? '').trim(),
+        email: emailHeader ? String(row[emailHeader] ?? '').trim() || null : null,
+        phone: phoneHeader ? String(row[phoneHeader] ?? '').trim() || null : null,
+      }))
+      .filter((row) => row.name.length > 0);
+  };
+
+  const handleParticipantImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedEventId) return;
-    const text = await file.text();
-    const lines = text.split('\n').filter(l => l.trim());
-    if (lines.length < 2) { toast({ title: 'Error', description: 'CSV must have a header and at least one row', variant: 'destructive' }); return; }
 
-    const header = lines[0].split(',').map(h => h.trim().toLowerCase());
-    const nameIdx = header.indexOf('name');
-    const emailIdx = header.indexOf('email');
-    const phoneIdx = header.indexOf('phone');
-    if (nameIdx === -1) { toast({ title: 'Error', description: 'CSV must have a "name" column', variant: 'destructive' }); return; }
+    try {
+      const parsedRows = await parseParticipantRowsFromFile(file);
 
-    const rows = lines.slice(1).map(line => {
-      const cols = line.split(',').map(c => c.trim());
-      return {
-        name: cols[nameIdx] || '',
-        email: emailIdx >= 0 ? cols[emailIdx] || null : null,
-        phone: phoneIdx >= 0 ? cols[phoneIdx] || null : null,
-        event_id: selectedEventId,
-        qr_token: crypto.randomUUID(),
-      };
-    }).filter(r => r.name);
+      if (!parsedRows.length) {
+        toast({ title: 'Error', description: 'No valid participant rows found', variant: 'destructive' });
+        return;
+      }
 
-    // Batch insert in chunks of 500
-    for (let i = 0; i < rows.length; i += 500) {
-      const chunk = rows.slice(i, i + 500);
-      const { error } = await supabase.from('participants').insert(chunk);
-      if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
+      const seen = new Set<string>();
+      const uniqueUploadRows = parsedRows.filter((row) => {
+        const key = buildParticipantKey(row.name, row.email, row.phone);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      const { data: existingParticipants, error: existingError } = await supabase
+        .from('participants')
+        .select('name,email,phone')
+        .eq('event_id', selectedEventId);
+
+      if (existingError) throw existingError;
+
+      const existingKeys = new Set(
+        (existingParticipants || []).map((p) => buildParticipantKey(p.name, p.email, p.phone))
+      );
+
+      const rowsToInsert = uniqueUploadRows
+        .filter((row) => !existingKeys.has(buildParticipantKey(row.name, row.email, row.phone)))
+        .map((row) => ({
+          name: row.name,
+          email: row.email,
+          phone: row.phone,
+          event_id: selectedEventId,
+          qr_token: crypto.randomUUID(),
+        }));
+
+      if (!rowsToInsert.length) {
+        toast({ title: 'No new participants', description: 'All rows were duplicates and were skipped.' });
+        return;
+      }
+
+      for (let i = 0; i < rowsToInsert.length; i += 500) {
+        const chunk = rowsToInsert.slice(i, i + 500);
+        const { error } = await supabase.from('participants').insert(chunk);
+        if (error) throw error;
+      }
+
+      const skipped = parsedRows.length - rowsToInsert.length;
+      toast({
+        title: 'Import complete',
+        description: `${rowsToInsert.length} participants imported${skipped > 0 ? `, ${skipped} skipped as duplicates` : ''}`,
+      });
+
+      fetchParticipants(selectedEventId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Import failed';
+      toast({ title: 'Error', description: message, variant: 'destructive' });
+    } finally {
+      e.target.value = '';
     }
-    toast({ title: 'Success', description: `${rows.length} participants imported` });
-    fetchParticipants(selectedEventId);
-    e.target.value = '';
   };
 
   const exportParticipants = () => {
@@ -189,11 +262,19 @@ const AdminDashboard = () => {
   const checkedIn = participants.filter(p => p.checked_in).length;
   const total = participants.length;
 
-  if (loading || !profile) return null;
+  if (loading || (user && !profile)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-muted-foreground">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!profile) return null;
 
   return (
     <div className="min-h-screen bg-background">
-      <Navbar />
+      <Navbar profile={profile} onSignOut={signOut} />
       <div className="max-w-7xl mx-auto p-6">
         <Tabs defaultValue="events" className="space-y-6">
           <TabsList className="bg-secondary">
@@ -284,8 +365,8 @@ const AdminDashboard = () => {
                 <>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <Upload className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">Import CSV</span>
-                    <input type="file" accept=".csv" className="hidden" onChange={handleCSVImport} />
+                    <span className="text-sm text-muted-foreground">Import Excel/CSV</span>
+                    <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleParticipantImport} />
                   </label>
                   <Button size="sm" variant="outline" onClick={exportParticipants}>
                     <Download className="h-4 w-4 mr-1" />Export

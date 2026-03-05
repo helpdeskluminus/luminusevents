@@ -12,7 +12,10 @@ const Index = () => {
       navigate('/auth', { replace: true });
       return;
     }
-    if (!profile) return;
+    if (!profile) {
+      navigate('/pending', { replace: true });
+      return;
+    }
     if (profile.approval_status !== 'approved') {
       navigate('/pending', { replace: true });
       return;
