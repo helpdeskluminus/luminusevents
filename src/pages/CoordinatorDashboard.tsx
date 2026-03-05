@@ -32,7 +32,7 @@ interface Participant {
 }
 
 const CoordinatorDashboard = () => {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, signOut } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -44,9 +44,9 @@ const CoordinatorDashboard = () => {
   const scannerContainerId = 'qr-reader';
 
   useEffect(() => {
-    if (!loading && (!user || !profile)) navigate('/auth', { replace: true });
-    if (!loading && profile && profile.role !== 'coordinator') navigate('/', { replace: true });
-    if (!loading && profile && profile.approval_status !== 'approved') navigate('/pending', { replace: true });
+    if (!loading && !user) navigate('/auth', { replace: true });
+    if (!loading && user && profile && profile.role !== 'coordinator') navigate('/', { replace: true });
+    if (!loading && user && profile && profile.approval_status !== 'approved') navigate('/pending', { replace: true });
   }, [user, profile, loading, navigate]);
 
   const fetchEvent = useCallback(async () => {
@@ -169,12 +169,20 @@ const CoordinatorDashboard = () => {
   const checkedIn = participants.filter(p => p.checked_in).length;
   const total = participants.length;
 
-  if (loading || !profile) return null;
+  if (loading || (user && !profile)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-muted-foreground">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!profile) return null;
 
   if (!profile.assigned_event_id) {
     return (
       <div className="min-h-screen bg-background">
-        <Navbar />
+        <Navbar profile={profile} onSignOut={signOut} />
         <div className="flex items-center justify-center mt-32">
           <div className="text-center space-y-4">
             <p className="text-muted-foreground">No event has been assigned to you yet.</p>
@@ -187,7 +195,7 @@ const CoordinatorDashboard = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <Navbar />
+      <Navbar profile={profile} onSignOut={signOut} />
       <div className="max-w-4xl mx-auto p-6">
         {event && (
           <div className="mb-6 p-4 rounded-lg bg-card border border-border">
