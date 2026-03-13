@@ -6,7 +6,7 @@ import { Navbar } from '@/components/Navbar';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ScanLine, Users, BarChart3 } from 'lucide-react';
+import { ScanLine, Users, BarChart3, Check } from 'lucide-react';
 
 interface Html5Qrcode {
   start(config: unknown, videoConstraints: unknown, onScan: (text: string) => void, onError: () => void): Promise<void>;
@@ -62,20 +62,14 @@ const CoordinatorDashboard = () => {
   }, [profile?.assigned_event_id]);
 
   useEffect(() => {
-    if (profile?.assigned_event_id) {
-      fetchEvent();
-      fetchParticipants();
-    }
+    if (profile?.assigned_event_id) { fetchEvent(); fetchParticipants(); }
   }, [profile?.assigned_event_id, fetchEvent, fetchParticipants]);
 
-  // Realtime
   useEffect(() => {
     if (!profile?.assigned_event_id) return;
     const channel = supabase
       .channel('coordinator-participants')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'participants', filter: `event_id=eq.${profile.assigned_event_id}` }, () => {
-        fetchParticipants();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'participants', filter: `event_id=eq.${profile.assigned_event_id}` }, () => fetchParticipants())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [profile?.assigned_event_id, fetchParticipants]);
@@ -83,15 +77,10 @@ const CoordinatorDashboard = () => {
   const startScanner = async () => {
     setScanning(true);
     setScanResult(null);
-    // Dynamic import to avoid SSR issues
     const { Html5Qrcode } = await import('html5-qrcode');
-    
-    // Wait for DOM element
     await new Promise(resolve => setTimeout(resolve, 100));
-    
     const scanner = new Html5Qrcode(scannerContainerId);
     scannerRef.current = scanner;
-
     try {
       await scanner.start(
         { facingMode: 'environment' },
@@ -103,68 +92,39 @@ const CoordinatorDashboard = () => {
               setScanResult({ success: false, message: 'Invalid QR code format' });
               return;
             }
-
-            // Stop scanner before processing
             await scanner.stop();
             scannerRef.current = null;
             setScanning(false);
-
             const { data, error } = await supabase.rpc('checkin_participant', {
-              _participant_id: payload.participant_id,
-              _event_id: payload.event_id,
-              _qr_token: payload.qr_token,
+              _participant_id: payload.participant_id, _event_id: payload.event_id, _qr_token: payload.qr_token,
             });
-
-            if (error) {
-              setScanResult({ success: false, message: error.message });
-            } else {
+            if (error) { setScanResult({ success: false, message: error.message }); }
+            else {
               const result = data as { success: boolean; error?: string; name?: string };
               if (result.success) {
                 setScanResult({ success: true, message: 'Check-in successful!', name: result.name });
                 toast({ title: '✓ Checked In', description: result.name });
               } else {
-                setScanResult({ success: false, message: result.error });
+                setScanResult({ success: false, message: result.error || 'Check-in failed' });
               }
             }
             fetchParticipants();
-          } catch {
-            setScanResult({ success: false, message: 'Invalid QR code' });
-          }
+          } catch { setScanResult({ success: false, message: 'Invalid QR code' }); }
         },
-        () => {
-          // ignore scan errors
-        }
+        () => {}
       );
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Could not access camera';
-      toast({ title: 'Camera Error', description: errMsg, variant: 'destructive' });
+      toast({ title: 'Camera Error', description: err instanceof Error ? err.message : 'Could not access camera', variant: 'destructive' });
       setScanning(false);
     }
   };
 
   const stopScanner = async () => {
-    if (scannerRef.current) {
-      try {
-        await scannerRef.current.stop();
-      } catch {
-        // ignore stop errors
-      }
-      scannerRef.current = null;
-    }
+    if (scannerRef.current) { try { await scannerRef.current.stop(); } catch {} scannerRef.current = null; }
     setScanning(false);
   };
 
-  useEffect(() => {
-    return () => {
-      if (scannerRef.current) {
-        try {
-          scannerRef.current.stop();
-        } catch {
-          // ignore cleanup errors
-        }
-      }
-    };
-  }, []);
+  useEffect(() => { return () => { if (scannerRef.current) { try { scannerRef.current.stop(); } catch {} } }; }, []);
 
   const checkedIn = participants.filter(p => p.checked_in).length;
   const total = participants.length;
@@ -172,7 +132,10 @@ const CoordinatorDashboard = () => {
   if (loading || (user && !profile)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-muted-foreground">Loading...</div>
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-10 w-10 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          <p className="text-sm text-muted-foreground font-body">Loading...</p>
+        </div>
       </div>
     );
   }
@@ -185,8 +148,11 @@ const CoordinatorDashboard = () => {
         <Navbar profile={profile} onSignOut={signOut} />
         <div className="flex items-center justify-center mt-32">
           <div className="text-center space-y-4">
-            <p className="text-muted-foreground">No event has been assigned to you yet.</p>
-            <p className="text-sm text-muted-foreground">Please contact your administrator.</p>
+            <h2 className="text-3xl font-bold text-foreground">
+              <span className="bordered-text">No event</span>{' '}
+              <span className="highlight-text">assigned</span>
+            </h2>
+            <p className="text-sm text-muted-foreground font-body">Please contact your administrator.</p>
           </div>
         </div>
       </div>
@@ -196,90 +162,106 @@ const CoordinatorDashboard = () => {
   return (
     <div className="min-h-screen bg-background">
       <Navbar profile={profile} onSignOut={signOut} />
-      <div className="max-w-4xl mx-auto p-6">
+      <div className="max-w-4xl mx-auto px-6 py-8">
         {event && (
-          <div className="mb-6 p-4 rounded-lg bg-card border border-border">
-            <h2 className="text-xl font-bold text-foreground">{event.name}</h2>
-            <p className="text-sm text-muted-foreground">{new Date(event.date).toLocaleString()} · {event.location}</p>
+          <div className="mb-8 p-6 rounded-xl border border-border bg-card">
+            <div className="flex items-center gap-4">
+              <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center">
+                <ScanLine className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-bold text-foreground">{event.name}</h2>
+                <p className="text-xs text-muted-foreground font-body">{new Date(event.date).toLocaleString()} · {event.location}</p>
+              </div>
+            </div>
           </div>
         )}
 
         <Tabs defaultValue="scanner" className="space-y-6">
-          <TabsList className="bg-secondary">
-            <TabsTrigger value="scanner"><ScanLine className="h-4 w-4 mr-1" />Scanner</TabsTrigger>
-            <TabsTrigger value="participants"><Users className="h-4 w-4 mr-1" />Participants</TabsTrigger>
-            <TabsTrigger value="stats"><BarChart3 className="h-4 w-4 mr-1" />Stats</TabsTrigger>
+          <TabsList className="bg-secondary rounded-full p-1 h-auto">
+            <TabsTrigger value="scanner" className="rounded-full text-xs font-semibold tracking-wider data-[state=active]:bg-foreground data-[state=active]:text-background px-4 py-2">
+              <ScanLine className="h-3.5 w-3.5 mr-1.5" />SCANNER
+            </TabsTrigger>
+            <TabsTrigger value="participants" className="rounded-full text-xs font-semibold tracking-wider data-[state=active]:bg-foreground data-[state=active]:text-background px-4 py-2">
+              <Users className="h-3.5 w-3.5 mr-1.5" />PARTICIPANTS
+            </TabsTrigger>
+            <TabsTrigger value="stats" className="rounded-full text-xs font-semibold tracking-wider data-[state=active]:bg-foreground data-[state=active]:text-background px-4 py-2">
+              <BarChart3 className="h-3.5 w-3.5 mr-1.5" />STATS
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="scanner" className="space-y-4">
-            <div className="flex flex-col items-center gap-4">
+            <div className="flex flex-col items-center gap-6">
               {!scanning ? (
-                <Button onClick={startScanner} size="lg" className="gap-2">
-                  <ScanLine className="h-5 w-5" />
-                  Start Scanner
+                <Button onClick={startScanner} size="lg" className="rounded-full px-8 text-sm font-semibold tracking-wider gap-2 h-14">
+                  <ScanLine className="h-5 w-5" /> START SCANNER
                 </Button>
               ) : (
-                <Button onClick={stopScanner} variant="outline" size="lg">Stop Scanner</Button>
+                <Button onClick={stopScanner} variant="outline" size="lg" className="rounded-full px-8 text-sm font-semibold tracking-wider h-14">
+                  STOP SCANNER
+                </Button>
               )}
-              <div id={scannerContainerId} className="w-full max-w-sm rounded-lg overflow-hidden" />
+              <div id={scannerContainerId} className="w-full max-w-sm rounded-xl overflow-hidden border border-border" />
               {scanResult && (
-                <div className={`p-4 rounded-lg w-full max-w-sm text-center ${scanResult.success ? 'bg-success/10 border border-success/30' : 'bg-destructive/10 border border-destructive/30'}`}>
-                  <p className={`font-medium ${scanResult.success ? 'text-success' : 'text-destructive'}`}>
+                <div className={`p-6 rounded-xl w-full max-w-sm text-center border ${scanResult.success ? 'bg-success/5 border-success/30' : 'bg-destructive/5 border-destructive/30'}`}>
+                  <p className={`font-semibold text-sm ${scanResult.success ? 'text-success' : 'text-destructive'}`}>
                     {scanResult.message}
                   </p>
-                  {scanResult.name && <p className="text-foreground mt-1">{scanResult.name}</p>}
+                  {scanResult.name && <p className="text-foreground mt-2 font-body text-lg font-bold">{scanResult.name}</p>}
                 </div>
               )}
             </div>
           </TabsContent>
 
           <TabsContent value="participants">
-            <div className="overflow-x-auto">
+            <div className="rounded-xl border border-border overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border text-muted-foreground">
-                    <th className="text-left py-3 px-3">Name</th>
-                    <th className="text-left py-3 px-3">Email</th>
-                    <th className="text-left py-3 px-3">Status</th>
-                    <th className="text-left py-3 px-3">Time</th>
+                  <tr className="bg-secondary">
+                    <th className="text-left py-3 px-4 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Name</th>
+                    <th className="text-left py-3 px-4 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Email</th>
+                    <th className="text-left py-3 px-4 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Status</th>
+                    <th className="text-left py-3 px-4 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Time</th>
                   </tr>
                 </thead>
                 <tbody>
                   {participants.map(p => (
-                    <tr key={p.id} className="border-b border-border/50">
-                      <td className="py-3 px-3 text-foreground">{p.name}</td>
-                      <td className="py-3 px-3 text-muted-foreground">{p.email || '—'}</td>
-                      <td className="py-3 px-3">
+                    <tr key={p.id} className="border-t border-border hover:bg-secondary/50 transition-colors">
+                      <td className="py-3 px-4 text-foreground font-medium font-body text-xs">{p.name}</td>
+                      <td className="py-3 px-4 text-muted-foreground font-body text-xs">{p.email || '—'}</td>
+                      <td className="py-3 px-4">
                         {p.checked_in ? (
-                          <span className="text-success text-xs font-medium">✓ Checked In</span>
+                          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-success/10 text-success font-semibold">
+                            <Check className="h-3 w-3" /> CHECKED IN
+                          </span>
                         ) : (
-                          <span className="text-muted-foreground text-xs">Pending</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-muted-foreground font-semibold">PENDING</span>
                         )}
                       </td>
-                      <td className="py-3 px-3 text-muted-foreground text-xs">
+                      <td className="py-3 px-4 text-muted-foreground font-body text-xs">
                         {p.checked_in_at ? new Date(p.checked_in_at).toLocaleTimeString() : '—'}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {participants.length === 0 && <p className="text-muted-foreground text-sm py-4">No participants.</p>}
+              {participants.length === 0 && <p className="text-muted-foreground text-sm font-body py-8 text-center">No participants.</p>}
             </div>
           </TabsContent>
 
           <TabsContent value="stats">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="p-6 rounded-lg bg-card border border-border text-center">
-                <p className="text-4xl font-bold text-foreground">{total}</p>
-                <p className="text-sm text-muted-foreground mt-1">Total</p>
+              <div className="p-8 rounded-xl border border-border bg-card text-center">
+                <p className="text-5xl font-bold text-foreground">{total}</p>
+                <p className="text-xs text-muted-foreground font-body mt-2 uppercase tracking-wider">Total</p>
               </div>
-              <div className="p-6 rounded-lg bg-card border border-border text-center">
-                <p className="text-4xl font-bold text-success">{checkedIn}</p>
-                <p className="text-sm text-muted-foreground mt-1">Checked In</p>
+              <div className="p-8 rounded-xl border border-border bg-card text-center">
+                <p className="text-5xl font-bold text-success">{checkedIn}</p>
+                <p className="text-xs text-muted-foreground font-body mt-2 uppercase tracking-wider">Checked In</p>
               </div>
-              <div className="p-6 rounded-lg bg-card border border-border text-center">
-                <p className="text-4xl font-bold text-primary">{total > 0 ? Math.round((checkedIn / total) * 100) : 0}%</p>
-                <p className="text-sm text-muted-foreground mt-1">Rate</p>
+              <div className="p-8 rounded-xl border border-border bg-card text-center">
+                <p className="text-5xl font-bold text-primary">{total > 0 ? Math.round((checkedIn / total) * 100) : 0}%</p>
+                <p className="text-xs text-muted-foreground font-body mt-2 uppercase tracking-wider">Rate</p>
               </div>
             </div>
           </TabsContent>

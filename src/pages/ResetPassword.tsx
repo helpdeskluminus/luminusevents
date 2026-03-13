@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { config } from '@/lib/config';
+import { ArrowRight } from 'lucide-react';
 
 const ResetPassword = () => {
   const [password, setPassword] = useState('');
@@ -15,13 +16,9 @@ const ResetPassword = () => {
 
   useEffect(() => {
     const hash = window.location.hash;
-    if (hash.includes('type=recovery')) {
-      setIsRecovery(true);
-    }
+    if (hash.includes('type=recovery')) setIsRecovery(true);
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') {
-        setIsRecovery(true);
-      }
+      if (event === 'PASSWORD_RECOVERY') setIsRecovery(true);
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -45,10 +42,15 @@ const ResetPassword = () => {
   if (!isRecovery) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background px-4">
-        <div className="text-center space-y-4">
-          <h1 className="text-2xl font-bold text-foreground">{config.appName}</h1>
-          <p className="text-muted-foreground">Invalid or expired reset link.</p>
-          <Button onClick={() => navigate('/auth')}>Back to Sign In</Button>
+        <div className="text-center space-y-6">
+          <h1 className="text-4xl font-bold text-foreground">
+            <span className="bordered-text">Invalid</span>{' '}
+            <span className="highlight-text">link</span>
+          </h1>
+          <p className="text-sm text-muted-foreground font-body">Invalid or expired reset link.</p>
+          <Button onClick={() => navigate('/auth')} className="rounded-full px-8 text-xs font-semibold tracking-wider gap-2">
+            BACK TO SIGN IN <ArrowRight className="h-4 w-4" />
+          </Button>
         </div>
       </div>
     );
@@ -56,12 +58,15 @@ const ResetPassword = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm space-y-8">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-foreground">{config.appName}</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Enter your new password</p>
+      <div className="w-full max-w-md space-y-10">
+        <div className="text-center space-y-4">
+          <h1 className="text-5xl font-bold tracking-tight text-foreground">
+            <span className="bordered-text">New</span>{' '}
+            <span className="highlight-text">password</span>
+          </h1>
+          <p className="text-sm text-muted-foreground font-body">Enter your new password below.</p>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-3">
           <Input
             type="password"
             placeholder="New password"
@@ -69,10 +74,11 @@ const ResetPassword = () => {
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={6}
-            className="bg-secondary border-border text-foreground"
+            className="h-12 rounded-full px-5 bg-secondary border-border text-foreground font-body"
           />
-          <Button type="submit" disabled={loading} className="w-full">
-            {loading ? 'Updating...' : 'Update Password'}
+          <Button type="submit" disabled={loading} className="w-full h-12 rounded-full text-sm font-semibold tracking-wider gap-2">
+            {loading ? 'Updating...' : 'UPDATE PASSWORD'}
+            {!loading && <ArrowRight className="h-4 w-4" />}
           </Button>
         </form>
       </div>
