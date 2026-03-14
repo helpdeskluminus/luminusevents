@@ -265,11 +265,37 @@ const CoordinatorDashboard = () => {
               )}
               <div id={scannerContainerId} className="w-full max-w-sm rounded-xl overflow-hidden border border-border" />
               {scanResult && (
-                <div className={`p-6 rounded-xl w-full max-w-sm text-center border ${scanResult.success ? 'bg-success/5 border-success/30' : 'bg-destructive/5 border-destructive/30'}`}>
-                  <p className={`font-semibold text-sm ${scanResult.success ? 'text-success' : 'text-destructive'}`}>
-                    {scanResult.message}
+                <div className={`p-6 rounded-xl w-full max-w-sm border ${scanResult.success ? 'bg-success/5 border-success/30' : scanResult.alreadyCheckedIn ? 'bg-accent/50 border-accent' : 'bg-destructive/5 border-destructive/30'}`}>
+                  <p className={`font-semibold text-sm text-center ${scanResult.success ? 'text-success' : scanResult.alreadyCheckedIn ? 'text-accent-foreground' : 'text-destructive'}`}>
+                    {scanResult.success ? '✓ ' : scanResult.alreadyCheckedIn ? '⚠ ' : '✗ '}{scanResult.message}
                   </p>
-                  {scanResult.name && <p className="text-foreground mt-2 font-body text-lg font-bold">{scanResult.name}</p>}
+                  {(scanResult.name || scanResult.phone || scanResult.participantId) && (
+                    <div className="mt-4 space-y-2 text-left">
+                      {scanResult.name && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Name</span>
+                          <span className="text-sm font-bold text-foreground">{scanResult.name}</span>
+                        </div>
+                      )}
+                      {scanResult.phone && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Phone</span>
+                          <span className="text-sm font-body text-foreground">{scanResult.phone}</span>
+                        </div>
+                      )}
+                      {scanResult.participantId && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Unique ID</span>
+                          <span className="text-xs font-mono text-muted-foreground">{scanResult.participantId.slice(0, 8)}...</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {!scanning && (
+                    <Button onClick={() => { setScanResult(null); startScanner(); }} size="sm" variant="outline" className="w-full mt-4 rounded-full text-xs font-semibold tracking-wider">
+                      <ScanLine className="h-3.5 w-3.5 mr-1.5" /> SCAN AGAIN
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
