@@ -14,6 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      checkins: {
+        Row: {
+          event_id: string
+          id: string
+          participant_id: string
+          scanned_at: string
+          scanned_by: string
+        }
+        Insert: {
+          event_id: string
+          id?: string
+          participant_id: string
+          scanned_at?: string
+          scanned_by: string
+        }
+        Update: {
+          event_id?: string
+          id?: string
+          participant_id?: string
+          scanned_at?: string
+          scanned_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "checkins_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "checkins_participant_id_fkey"
+            columns: ["participant_id"]
+            isOneToOne: false
+            referencedRelation: "participants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       events: {
         Row: {
           created_at: string | null
