@@ -22,6 +22,7 @@ const App = () => (
       <Route path="/pending" element={<PendingApproval />} />
       <Route path="/admin" element={<AdminDashboard />} />
       <Route path="/coordinator" element={<CoordinatorDashboard />} />
+      <Route path="/scan" element={<Scan />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   </TooltipProvider>
