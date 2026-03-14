@@ -94,30 +94,84 @@ const CoordinatorDashboard = () => {
         { facingMode: 'environment' },
         { fps: 10, qrbox: { width: 250, height: 250 } },
         async (decodedText) => {
+          if (isProcessing) return;
           try {
-            const payload = JSON.parse(decodedText);
-            if (!payload.participant_id || !payload.event_id || !payload.qr_token) {
-              setScanResult({ success: false, message: 'Invalid QR code format' });
+            let payload: { participant_id?: string; event_id?: string; qr_token?: string };
+            try {
+              payload = JSON.parse(decodedText);
+            } catch {
+              setScanResult({ success: false, message: 'Invalid Registration QR' });
               return;
             }
+            if (!payload.participant_id || !payload.event_id || !payload.qr_token) {
+              setScanResult({ success: false, message: 'Invalid Registration QR' });
+              return;
+            }
+
+            setIsProcessing(true);
             await scanner.stop();
             scannerRef.current = null;
             setScanning(false);
+
+            // Step 1: Validate against Supabase directly
+            const { data: participant, error: fetchErr } = await supabase
+              .from('participants')
+              .select('id, event_id, qr_token, name, phone, checked_in')
+              .eq('id', payload.participant_id)
+              .eq('event_id', payload.event_id)
+              .eq('qr_token', payload.qr_token)
+              .single();
+
+            if (fetchErr || !participant) {
+              setScanResult({ success: false, message: 'Invalid Registration QR' });
+              setIsProcessing(false);
+              return;
+            }
+
+            // Step 2: Already checked in?
+            if (participant.checked_in) {
+              setScanResult({
+                success: false,
+                message: 'Participant Already Checked In',
+                name: participant.name,
+                phone: participant.phone || undefined,
+                participantId: participant.id,
+                alreadyCheckedIn: true,
+              });
+              setIsProcessing(false);
+              return;
+            }
+
+            // Step 3: Check in via RPC (atomic update)
             const { data, error } = await supabase.rpc('checkin_participant', {
-              _participant_id: payload.participant_id, _event_id: payload.event_id, _qr_token: payload.qr_token,
+              _participant_id: payload.participant_id,
+              _event_id: payload.event_id,
+              _qr_token: payload.qr_token,
             });
-            if (error) { setScanResult({ success: false, message: error.message }); }
-            else {
+
+            if (error) {
+              setScanResult({ success: false, message: error.message });
+            } else {
               const result = data as { success: boolean; error?: string; name?: string };
               if (result.success) {
-                setScanResult({ success: true, message: 'Check-in successful!', name: result.name });
-                toast({ title: '✓ Checked In', description: result.name });
+                setScanResult({
+                  success: true,
+                  message: 'Check-in Successful!',
+                  name: participant.name,
+                  phone: participant.phone || undefined,
+                  participantId: participant.id,
+                });
+                toast({ title: '✓ Checked In', description: participant.name });
               } else {
                 setScanResult({ success: false, message: result.error || 'Check-in failed' });
               }
             }
             fetchParticipants();
-          } catch { setScanResult({ success: false, message: 'Invalid QR code' }); }
+            setIsProcessing(false);
+          } catch {
+            setScanResult({ success: false, message: 'Invalid Registration QR' });
+            setIsProcessing(false);
+          }
         },
         () => {}
       );
