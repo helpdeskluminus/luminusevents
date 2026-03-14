@@ -39,7 +39,15 @@ const CoordinatorDashboard = () => {
   const [event, setEvent] = useState<Event | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [scanning, setScanning] = useState(false);
-  const [scanResult, setScanResult] = useState<{ success: boolean; message: string; name?: string } | null>(null);
+  const [scanResult, setScanResult] = useState<{
+    success: boolean;
+    message: string;
+    name?: string;
+    phone?: string;
+    participantId?: string;
+    alreadyCheckedIn?: boolean;
+  } | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const scannerContainerId = 'qr-reader';
 
@@ -86,30 +94,84 @@ const CoordinatorDashboard = () => {
         { facingMode: 'environment' },
         { fps: 10, qrbox: { width: 250, height: 250 } },
         async (decodedText) => {
+          if (isProcessing) return;
           try {
-            const payload = JSON.parse(decodedText);
-            if (!payload.participant_id || !payload.event_id || !payload.qr_token) {
-              setScanResult({ success: false, message: 'Invalid QR code format' });
+            let payload: { participant_id?: string; event_id?: string; qr_token?: string };
+            try {
+              payload = JSON.parse(decodedText);
+            } catch {
+              setScanResult({ success: false, message: 'Invalid Registration QR' });
               return;
             }
+            if (!payload.participant_id || !payload.event_id || !payload.qr_token) {
+              setScanResult({ success: false, message: 'Invalid Registration QR' });
+              return;
+            }
+
+            setIsProcessing(true);
             await scanner.stop();
             scannerRef.current = null;
             setScanning(false);
+
+            // Step 1: Validate against Supabase directly
+            const { data: participant, error: fetchErr } = await supabase
+              .from('participants')
+              .select('id, event_id, qr_token, name, phone, checked_in')
+              .eq('id', payload.participant_id)
+              .eq('event_id', payload.event_id)
+              .eq('qr_token', payload.qr_token)
+              .single();
+
+            if (fetchErr || !participant) {
+              setScanResult({ success: false, message: 'Invalid Registration QR' });
+              setIsProcessing(false);
+              return;
+            }
+
+            // Step 2: Already checked in?
+            if (participant.checked_in) {
+              setScanResult({
+                success: false,
+                message: 'Participant Already Checked In',
+                name: participant.name,
+                phone: participant.phone || undefined,
+                participantId: participant.id,
+                alreadyCheckedIn: true,
+              });
+              setIsProcessing(false);
+              return;
+            }
+
+            // Step 3: Check in via RPC (atomic update)
             const { data, error } = await supabase.rpc('checkin_participant', {
-              _participant_id: payload.participant_id, _event_id: payload.event_id, _qr_token: payload.qr_token,
+              _participant_id: payload.participant_id,
+              _event_id: payload.event_id,
+              _qr_token: payload.qr_token,
             });
-            if (error) { setScanResult({ success: false, message: error.message }); }
-            else {
+
+            if (error) {
+              setScanResult({ success: false, message: error.message });
+            } else {
               const result = data as { success: boolean; error?: string; name?: string };
               if (result.success) {
-                setScanResult({ success: true, message: 'Check-in successful!', name: result.name });
-                toast({ title: '✓ Checked In', description: result.name });
+                setScanResult({
+                  success: true,
+                  message: 'Check-in Successful!',
+                  name: participant.name,
+                  phone: participant.phone || undefined,
+                  participantId: participant.id,
+                });
+                toast({ title: '✓ Checked In', description: participant.name });
               } else {
                 setScanResult({ success: false, message: result.error || 'Check-in failed' });
               }
             }
             fetchParticipants();
-          } catch { setScanResult({ success: false, message: 'Invalid QR code' }); }
+            setIsProcessing(false);
+          } catch {
+            setScanResult({ success: false, message: 'Invalid Registration QR' });
+            setIsProcessing(false);
+          }
         },
         () => {}
       );
@@ -203,11 +265,37 @@ const CoordinatorDashboard = () => {
               )}
               <div id={scannerContainerId} className="w-full max-w-sm rounded-xl overflow-hidden border border-border" />
               {scanResult && (
-                <div className={`p-6 rounded-xl w-full max-w-sm text-center border ${scanResult.success ? 'bg-success/5 border-success/30' : 'bg-destructive/5 border-destructive/30'}`}>
-                  <p className={`font-semibold text-sm ${scanResult.success ? 'text-success' : 'text-destructive'}`}>
-                    {scanResult.message}
+                <div className={`p-6 rounded-xl w-full max-w-sm border ${scanResult.success ? 'bg-success/5 border-success/30' : scanResult.alreadyCheckedIn ? 'bg-accent/50 border-accent' : 'bg-destructive/5 border-destructive/30'}`}>
+                  <p className={`font-semibold text-sm text-center ${scanResult.success ? 'text-success' : scanResult.alreadyCheckedIn ? 'text-accent-foreground' : 'text-destructive'}`}>
+                    {scanResult.success ? '✓ ' : scanResult.alreadyCheckedIn ? '⚠ ' : '✗ '}{scanResult.message}
                   </p>
-                  {scanResult.name && <p className="text-foreground mt-2 font-body text-lg font-bold">{scanResult.name}</p>}
+                  {(scanResult.name || scanResult.phone || scanResult.participantId) && (
+                    <div className="mt-4 space-y-2 text-left">
+                      {scanResult.name && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Name</span>
+                          <span className="text-sm font-bold text-foreground">{scanResult.name}</span>
+                        </div>
+                      )}
+                      {scanResult.phone && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Phone</span>
+                          <span className="text-sm font-body text-foreground">{scanResult.phone}</span>
+                        </div>
+                      )}
+                      {scanResult.participantId && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Unique ID</span>
+                          <span className="text-xs font-mono text-muted-foreground">{scanResult.participantId.slice(0, 8)}...</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {!scanning && (
+                    <Button onClick={() => { setScanResult(null); startScanner(); }} size="sm" variant="outline" className="w-full mt-4 rounded-full text-xs font-semibold tracking-wider">
+                      <ScanLine className="h-3.5 w-3.5 mr-1.5" /> SCAN AGAIN
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
