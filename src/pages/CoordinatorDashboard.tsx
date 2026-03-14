@@ -39,7 +39,15 @@ const CoordinatorDashboard = () => {
   const [event, setEvent] = useState<Event | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [scanning, setScanning] = useState(false);
-  const [scanResult, setScanResult] = useState<{ success: boolean; message: string; name?: string } | null>(null);
+  const [scanResult, setScanResult] = useState<{
+    success: boolean;
+    message: string;
+    name?: string;
+    phone?: string;
+    participantId?: string;
+    alreadyCheckedIn?: boolean;
+  } | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const scannerContainerId = 'qr-reader';
 
