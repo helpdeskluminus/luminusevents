@@ -16,9 +16,11 @@ export const Navbar = ({ profile, onSignOut }: NavbarProps) => {
   const navItems = profile.role === 'admin'
     ? [
         { label: 'DASHBOARD', path: '/admin' },
+        { label: 'SCAN QR', path: '/scan' },
       ]
     : [
         { label: 'SCANNER', path: '/coordinator' },
+        { label: 'SCAN QR', path: '/scan' },
       ];
 
   return (
