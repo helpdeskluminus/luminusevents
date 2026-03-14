@@ -8,6 +8,7 @@ import ResetPassword from "./pages/ResetPassword";
 import PendingApproval from "./pages/PendingApproval";
 import AdminDashboard from "./pages/AdminDashboard";
 import CoordinatorDashboard from "./pages/CoordinatorDashboard";
+import Scan from "./pages/Scan";
 import NotFound from "./pages/NotFound";
 
 const App = () => (
