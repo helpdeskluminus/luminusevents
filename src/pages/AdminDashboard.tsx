@@ -9,8 +9,11 @@ import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   CalendarDays, Users, UserCheck, BarChart3, Upload, Download, QrCode,
-  Plus, Trash2, Check, X, ArrowRight
+  Plus, Trash2, Check, X, ArrowRight, Shield, ShieldAlert
 } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu';
 import QRCode from 'qrcode';
 import * as XLSX from 'xlsx';
 
@@ -123,6 +126,25 @@ const AdminDashboard = () => {
   const assignEvent = async (userId: string, eventId: string | null) => {
     const { error } = await supabase.from('users').update({ assigned_event_id: eventId }).eq('id', userId);
     if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
+    fetchUsers();
+  };
+
+  const changeUserRole = async (targetUserId: string, newRole: string) => {
+    if (targetUserId === user?.id) {
+      toast({ title: 'Error', description: 'You cannot change your own role.', variant: 'destructive' });
+      return;
+    }
+    const targetUser = users.find(u => u.id === targetUserId);
+    if (targetUser?.role === 'admin' && newRole !== 'admin') {
+      const adminCount = users.filter(u => u.role === 'admin').length;
+      if (adminCount <= 1) {
+        toast({ title: 'Error', description: 'Cannot remove the last admin.', variant: 'destructive' });
+        return;
+      }
+    }
+    const { error } = await supabase.from('users').update({ role: newRole }).eq('id', targetUserId);
+    if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
+    toast({ title: 'Role updated successfully' });
     fetchUsers();
   };
 
@@ -384,6 +406,31 @@ const AdminDashboard = () => {
                     <Button size="sm" variant="outline" onClick={() => updateUserApproval(u.id, 'rejected')} className="rounded-full text-xs font-semibold tracking-wider">
                       REVOKE
                     </Button>
+                  )}
+                  {u.id !== user?.id && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="sm" variant="outline" className="rounded-full text-xs font-semibold tracking-wider gap-1">
+                          <Shield className="h-3.5 w-3.5" /> ROLE
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          disabled={u.role === 'admin'}
+                          onClick={() => changeUserRole(u.id, 'admin')}
+                          className="text-xs font-semibold gap-2"
+                        >
+                          <ShieldAlert className="h-3.5 w-3.5" /> Make Admin
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={u.role === 'coordinator'}
+                          onClick={() => changeUserRole(u.id, 'coordinator')}
+                          className="text-xs font-semibold gap-2"
+                        >
+                          <Shield className="h-3.5 w-3.5" /> Make Coordinator
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   )}
                 </div>
               </div>
