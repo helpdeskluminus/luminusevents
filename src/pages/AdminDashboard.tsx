@@ -392,6 +392,11 @@ const AdminDashboard = () => {
                       <Button size="sm" onClick={() => updateUserApproval(u.id, 'approved')} className="rounded-full text-xs font-semibold tracking-wider gap-1">
                         <Check className="h-3.5 w-3.5" /> APPROVE
                       </Button>
+                      <Button size="sm" variant="outline" onClick={() => updateUserApproval(u.id, 'rejected')} className="rounded-full text-xs font-semibold tracking-wider text-destructive hover:bg-destructive hover:text-destructive-foreground gap-1">
+                        <X className="h-3.5 w-3.5" /> REJECT
+                      </Button>
+                    </>
+                  )}
                   {u.approval_status === 'rejected' && (
                     <Button size="sm" onClick={() => updateUserApproval(u.id, 'approved')} className="rounded-full text-xs font-semibold tracking-wider gap-1">
                       <Check className="h-3.5 w-3.5" /> APPROVE
