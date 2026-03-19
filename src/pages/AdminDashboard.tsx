@@ -129,6 +129,25 @@ const AdminDashboard = () => {
     fetchUsers();
   };
 
+  const changeUserRole = async (targetUserId: string, newRole: string) => {
+    if (targetUserId === user?.id) {
+      toast({ title: 'Error', description: 'You cannot change your own role.', variant: 'destructive' });
+      return;
+    }
+    const targetUser = users.find(u => u.id === targetUserId);
+    if (targetUser?.role === 'admin' && newRole !== 'admin') {
+      const adminCount = users.filter(u => u.role === 'admin').length;
+      if (adminCount <= 1) {
+        toast({ title: 'Error', description: 'Cannot remove the last admin.', variant: 'destructive' });
+        return;
+      }
+    }
+    const { error } = await supabase.from('users').update({ role: newRole }).eq('id', targetUserId);
+    if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
+    toast({ title: 'Role updated successfully' });
+    fetchUsers();
+  };
+
   const buildParticipantKey = (name: string, email?: string | null, phone?: string | null) =>
     `${name.trim().toLowerCase()}|${(email || '').trim().toLowerCase()}|${(phone || '').trim().toLowerCase()}`;
 
