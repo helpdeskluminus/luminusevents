@@ -9,8 +9,11 @@ import { useToast } from '@/hooks/use-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   CalendarDays, Users, UserCheck, BarChart3, Upload, Download, QrCode,
-  Plus, Trash2, Check, X, ArrowRight
+  Plus, Trash2, Check, X, ArrowRight, Shield, ShieldAlert
 } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu';
 import QRCode from 'qrcode';
 import * as XLSX from 'xlsx';
 
