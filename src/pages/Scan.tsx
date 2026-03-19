@@ -1,16 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { Navbar } from '@/components/Navbar';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { ScanLine, Camera, ShieldCheck, ShieldX, AlertTriangle, Clock, User, Phone, Hash } from 'lucide-react';
-
-interface Html5Qrcode {
-  start(config: unknown, videoConstraints: unknown, onScan: (text: string) => void, onError: () => void): Promise<void>;
-  stop(): Promise<void>;
-}
+import { ScanLine, Camera, ShieldCheck, ShieldX, AlertTriangle, Clock, User, Phone, Hash, Users, CheckCircle } from 'lucide-react';
 
 interface ScanResult {
   type: 'success' | 'already' | 'invalid';
@@ -27,6 +22,14 @@ interface ScanHistoryItem {
   status: 'success' | 'already' | 'invalid';
 }
 
+interface LiveStats {
+  total: number;
+  checkedIn: number;
+  remaining: number;
+}
+
+const SCAN_COOLDOWN_MS = 2000;
+
 const Scan = () => {
   const { user, profile, loading, signOut } = useAuth();
   const navigate = useNavigate();
@@ -36,32 +39,82 @@ const Scan = () => {
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [scanHistory, setScanHistory] = useState<ScanHistoryItem[]>([]);
-  const [eventName, setEventName] = useState<string>('');
-  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const [eventName, setEventName] = useState('');
+  const [liveStats, setLiveStats] = useState<LiveStats>({ total: 0, checkedIn: 0, remaining: 0 });
+  const scannerRef = useRef<any>(null);
+  const lastScanTimeRef = useRef(0);
   const scannerContainerId = 'qr-scanner-viewport';
 
+  // Auth guard
   useEffect(() => {
     if (!loading && !user) navigate('/auth', { replace: true });
     if (!loading && user && profile) {
       if (profile.approval_status !== 'approved') navigate('/pending', { replace: true });
-      // Both admin and coordinator can access scan page
       if (profile.role === 'coordinator' && !profile.assigned_event_id) {
         navigate('/coordinator', { replace: true });
       }
     }
   }, [user, profile, loading, navigate]);
 
-  // Fetch event name
+  // Fetch event name & initial stats
   useEffect(() => {
-    const fetchEvent = async () => {
-      if (!profile?.assigned_event_id && profile?.role !== 'admin') return;
-      if (profile?.role === 'coordinator' && profile.assigned_event_id) {
-        const { data } = await supabase.from('events').select('name').eq('id', profile.assigned_event_id).single();
+    const fetchEventData = async () => {
+      if (!profile) return;
+      const eventId = profile.assigned_event_id;
+      if (profile.role === 'coordinator' && eventId) {
+        const { data } = await supabase.from('events').select('name').eq('id', eventId).single();
         if (data) setEventName(data.name);
       }
+
+      // Fetch live stats
+      const targetEventId = eventId;
+      if (targetEventId) {
+        const { data: participants } = await supabase
+          .from('participants')
+          .select('id, checked_in')
+          .eq('event_id', targetEventId);
+        if (participants) {
+          const checkedIn = participants.filter(p => p.checked_in).length;
+          setLiveStats({ total: participants.length, checkedIn, remaining: participants.length - checkedIn });
+        }
+      }
     };
-    fetchEvent();
+    fetchEventData();
   }, [profile]);
+
+  // Realtime stats subscription
+  useEffect(() => {
+    if (!profile?.assigned_event_id && profile?.role !== 'admin') return;
+    const eventId = profile?.assigned_event_id;
+    if (!eventId) return;
+
+    const channel = supabase
+      .channel('participant-changes')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'participants', filter: `event_id=eq.${eventId}` },
+        () => {
+          // Refetch stats on any participant change
+          supabase
+            .from('participants')
+            .select('id, checked_in')
+            .eq('event_id', eventId)
+            .then(({ data }) => {
+              if (data) {
+                const checkedIn = data.filter(p => p.checked_in).length;
+                setLiveStats({ total: data.length, checkedIn, remaining: data.length - checkedIn });
+              }
+            });
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [profile]);
+
+  const vibrate = () => {
+    if (navigator.vibrate) navigator.vibrate(200);
+  };
 
   const startScanner = async () => {
     setScanning(true);
@@ -73,9 +126,12 @@ const Scan = () => {
     try {
       await scanner.start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        async (decodedText) => {
+        { fps: 15, qrbox: { width: 250, height: 250 }, aspectRatio: 1, disableFlip: false },
+        async (decodedText: string) => {
+          const now = Date.now();
+          if (now - lastScanTimeRef.current < SCAN_COOLDOWN_MS) return;
           if (isProcessing) return;
+          lastScanTimeRef.current = now;
           await handleScan(decodedText, scanner);
         },
         () => {}
@@ -86,91 +142,80 @@ const Scan = () => {
     }
   };
 
-  const handleScan = async (decodedText: string, scanner: Html5Qrcode) => {
-    let payload: { participant_id?: string; event_id?: string; qr_token?: string };
+  const handleScan = async (decodedText: string, scanner: any) => {
+    let payload: { pid?: string; eid?: string; token?: string; sig?: string; participant_id?: string; event_id?: string; qr_token?: string };
     try {
       payload = JSON.parse(decodedText);
     } catch {
       setScanResult({ type: 'invalid', message: 'Invalid QR Code' });
+      vibrate();
       return;
     }
 
-    if (!payload.participant_id || !payload.event_id || !payload.qr_token) {
+    // Support both new signed format and legacy format
+    const pid = payload.pid || payload.participant_id;
+    const eid = payload.eid || payload.event_id;
+    const token = payload.token || payload.qr_token;
+    const sig = payload.sig;
+
+    if (!pid || !eid || !token) {
       setScanResult({ type: 'invalid', message: 'Invalid QR Code' });
+      vibrate();
       return;
     }
 
     setIsProcessing(true);
-    try {
-      await scanner.stop();
-    } catch {}
+    try { await scanner.stop(); } catch {}
     scannerRef.current = null;
     setScanning(false);
 
-    // Validate against Supabase
-    const { data: participant, error: fetchErr } = await supabase
-      .from('participants')
-      .select('id, event_id, qr_token, name, phone, checked_in')
-      .eq('id', payload.participant_id)
-      .eq('event_id', payload.event_id)
-      .eq('qr_token', payload.qr_token)
-      .single();
+    // Call edge function for secure validation
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
 
-    if (fetchErr || !participant) {
-      setScanResult({ type: 'invalid', message: 'Invalid QR Code' });
-      addToHistory('Unknown', 'invalid');
+    if (!accessToken) {
+      setScanResult({ type: 'invalid', message: 'Session expired. Please sign in again.' });
       setIsProcessing(false);
       return;
     }
 
-    if (participant.checked_in) {
-      setScanResult({
-        type: 'already',
-        message: 'Participant Already Checked In',
-        name: participant.name,
-        phone: participant.phone || undefined,
-        participantId: participant.id,
-      });
-      addToHistory(participant.name, 'already');
-      setIsProcessing(false);
-      return;
-    }
-
-    // Atomic check-in via RPC
-    const { data, error } = await supabase.rpc('checkin_participant', {
-      _participant_id: payload.participant_id,
-      _event_id: payload.event_id,
-      _qr_token: payload.qr_token,
+    const { data, error } = await supabase.functions.invoke('validate-qr', {
+      body: { pid, eid, token, sig },
     });
 
     if (error) {
-      setScanResult({ type: 'invalid', message: error.message });
+      setScanResult({ type: 'invalid', message: 'Validation failed' });
+      addToHistory('Unknown', 'invalid');
       setIsProcessing(false);
+      vibrate();
       return;
     }
 
-    const result = data as { success: boolean; error?: string };
-    if (result.success) {
+    if (data.status === 'success') {
+      vibrate();
       setScanResult({
         type: 'success',
-        message: 'Check-in Successful!',
-        name: participant.name,
-        phone: participant.phone || undefined,
-        participantId: participant.id,
+        message: data.message,
+        name: data.name,
+        phone: data.phone || undefined,
+        participantId: data.participantId,
       });
-      toast({ title: '✓ Checked In', description: participant.name });
-      addToHistory(participant.name, 'success');
-
-      // Log to checkins table
-      if (user) {
-        await supabase.from('checkins').insert({
-          participant_id: participant.id,
-          event_id: participant.event_id,
-          scanned_by: user.id,
-        });
-      }
+      toast({ title: '✓ Checked In', description: data.name });
+      addToHistory(data.name, 'success');
+    } else if (data.status === 'duplicate') {
+      vibrate();
+      setScanResult({
+        type: 'already',
+        message: data.message,
+        name: data.name,
+        phone: data.phone || undefined,
+        participantId: data.participantId,
+      });
+      addToHistory(data.name || 'Unknown', 'already');
     } else {
-      setScanResult({ type: 'invalid', message: result.error || 'Check-in failed' });
+      vibrate();
+      setScanResult({ type: 'invalid', message: data.message || 'Invalid QR Code' });
+      addToHistory('Unknown', 'invalid');
     }
 
     setIsProcessing(false);
@@ -219,13 +264,15 @@ const Scan = () => {
     ? 'border-amber-400/40 bg-amber-50'
     : 'border-destructive/40 bg-destructive/5';
 
+  const checkedInPercent = liveStats.total > 0 ? Math.round((liveStats.checkedIn / liveStats.total) * 100) : 0;
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar profile={profile} onSignOut={signOut} />
 
       <div className="max-w-lg mx-auto px-4 py-6 sm:py-10">
         {/* Header */}
-        <div className="text-center mb-6">
+        <div className="text-center mb-4">
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
             <span className="bordered-text">QR</span>{' '}
             <span className="highlight-text">Scanner</span>
@@ -234,6 +281,38 @@ const Scan = () => {
             <p className="text-xs text-muted-foreground font-body mt-2">{eventName}</p>
           )}
         </div>
+
+        {/* Live Stats Bar */}
+        {liveStats.total > 0 && (
+          <div className="mb-6 p-4 rounded-xl border border-border bg-card">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                <Users className="h-3.5 w-3.5" /> Live Stats
+              </div>
+              <span className="text-xs font-bold text-foreground">{checkedInPercent}%</span>
+            </div>
+            <div className="w-full h-2 bg-muted rounded-full overflow-hidden mb-3">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-500"
+                style={{ width: `${checkedInPercent}%` }}
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div>
+                <p className="text-lg font-bold text-foreground">{liveStats.total}</p>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Total</p>
+              </div>
+              <div>
+                <p className="text-lg font-bold text-success">{liveStats.checkedIn}</p>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Checked In</p>
+              </div>
+              <div>
+                <p className="text-lg font-bold text-destructive">{liveStats.remaining}</p>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Remaining</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Scanner Area */}
         <div className="flex flex-col items-center gap-4">
@@ -258,13 +337,11 @@ const Scan = () => {
             </Button>
           )}
 
-          {/* Camera viewport */}
           <div
             id={scannerContainerId}
             className={`w-full max-w-sm rounded-xl overflow-hidden border border-border ${scanning ? '' : 'hidden'}`}
           />
 
-          {/* Processing indicator */}
           {isProcessing && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground font-body">
               <div className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
