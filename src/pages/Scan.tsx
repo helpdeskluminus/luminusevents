@@ -37,6 +37,7 @@ const Scan = () => {
 
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [pendingTeamScan, setPendingTeamScan] = useState<{ teamId: string, participantData: any, token: string, participantId: string } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [scanHistory, setScanHistory] = useState<ScanHistoryItem[]>([]);
   const [eventName, setEventName] = useState('');
@@ -142,8 +143,55 @@ const Scan = () => {
     }
   };
 
+  const checkInParticipant = async (id: string, name: string, participantId: string) => {
+    setIsProcessing(true);
+    const { error: updErr } = await supabase
+      .from('participants')
+      .update({ checked_in: true, checked_in_at: new Date().toISOString() })
+      .eq('id', id);
+
+    if (!updErr) {
+      setScanResult({ type: 'success', message: 'Checked In Successfully', name, participantId });
+      addToHistory(name, 'success');
+      toast({ title: '✓ Checked In', description: name });
+    } else {
+      setScanResult({ type: 'invalid', message: 'Failed to update database' });
+    }
+    setPendingTeamScan(null);
+    setIsProcessing(false);
+  };
+
+  const checkInFullTeam = async (teamId: string) => {
+    setIsProcessing(true);
+    const searchStr = `"team_id":"${teamId}"`;
+    const { data: teamMembers } = await supabase
+      .from('participants')
+      .select('id, name')
+      .like('qr_token', `%${searchStr}%`);
+
+    if (teamMembers && teamMembers.length > 0) {
+      const ids = teamMembers.map(m => m.id);
+      const names = teamMembers.map(m => m.name).join(', ');
+      
+      const { error } = await supabase
+        .from('participants')
+        .update({ checked_in: true, checked_in_at: new Date().toISOString() })
+        .in('id', ids);
+        
+      if (!error) {
+        setScanResult({ type: 'success', message: `Team ${teamId} Checked In`, name: names, participantId: teamId });
+        addToHistory(`Team ${teamId}`, 'success');
+        toast({ title: '✓ Team Checked In', description: names });
+      } else {
+        setScanResult({ type: 'invalid', message: 'Failed to bulk-update database' });
+      }
+    }
+    setPendingTeamScan(null);
+    setIsProcessing(false);
+  };
+
   const handleScan = async (decodedText: string, scanner: any) => {
-    let payload: { pid?: string; eid?: string; token?: string; sig?: string; participant_id?: string; event_id?: string; qr_token?: string };
+    let payload: { pid?: string; eid?: string; token?: string; sig?: string; participant_id?: string; event_id?: string; qr_token?: string; team_id?: string; };
     try {
       payload = JSON.parse(decodedText);
     } catch {
@@ -152,7 +200,39 @@ const Scan = () => {
       return;
     }
 
-    // Support both new signed format and legacy format
+    setIsProcessing(true);
+    try { await scanner.stop(); } catch (e) { console.warn('Failed to stop scanner', e); }
+    scannerRef.current = null;
+    setScanning(false);
+
+    // 🔥 NEW DIRECT DB FAST-TRACK HANDLING FOR TEAMS
+    if (payload.team_id && payload.participant_id && !payload.eid) {
+       const { data: pData, error: pErr } = await supabase
+         .from('participants')
+         .select('*')
+         .eq('qr_token', decodedText)
+         .single();
+
+       if (pErr || !pData) {
+         setScanResult({ type: 'invalid', message: 'Participant not found in database' });
+         addToHistory('Unknown', 'invalid');
+       } else if (pData.checked_in) {
+         setScanResult({ type: 'already', message: 'Already Checked In', name: pData.name, participantId: payload.participant_id });
+         addToHistory(pData.name, 'already');
+       } else {
+         // Is Team Leader?
+         if (payload.participant_id.endsWith('A')) {
+           setPendingTeamScan({ teamId: payload.team_id, participantData: pData, token: decodedText, participantId: payload.participant_id });
+         } else {
+           await checkInParticipant(pData.id, pData.name, payload.participant_id);
+         }
+       }
+       setIsProcessing(false);
+       vibrate();
+       return;
+    }
+
+    // LEGACY JSON VALIDATOR
     const pid = payload.pid || payload.participant_id;
     const eid = payload.eid || payload.event_id;
     const token = payload.token || payload.qr_token;
@@ -160,14 +240,10 @@ const Scan = () => {
 
     if (!pid || !eid || !token) {
       setScanResult({ type: 'invalid', message: 'Invalid QR Code' });
+      setIsProcessing(false);
       vibrate();
       return;
     }
-
-    setIsProcessing(true);
-    try { await scanner.stop(); } catch {}
-    scannerRef.current = null;
-    setScanning(false);
 
     // Call edge function for secure validation
     const { data: sessionData } = await supabase.auth.getSession();
@@ -342,15 +418,35 @@ const Scan = () => {
             className={`w-full max-w-sm rounded-xl overflow-hidden border border-border ${scanning ? '' : 'hidden'}`}
           />
 
-          {isProcessing && (
+          {isProcessing && !pendingTeamScan && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground font-body">
               <div className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
               Validating...
             </div>
           )}
 
+          {/* Pending Team Scan Dialog */}
+          {pendingTeamScan && (
+            <div className="p-6 rounded-xl w-full border-2 border-primary/40 bg-card shadow-lg flex flex-col items-center text-center animate-in zoom-in-95 duration-200">
+               <Users className="h-10 w-10 text-primary mb-3" />
+               <h3 className="font-bold text-lg text-foreground mb-1">Team Leader Scanned!</h3>
+               <p className="text-sm font-body text-muted-foreground mb-4">
+                 You scanned <strong>{pendingTeamScan.participantData?.name}</strong>, the leader for team <strong className="font-mono text-primary">{pendingTeamScan.teamId}</strong>.
+               </p>
+               <div className="w-full flex-col sm:flex-row flex gap-3 mt-2">
+                 <Button onClick={() => checkInParticipant(pendingTeamScan.participantData.id, pendingTeamScan.participantData.name, pendingTeamScan.participantId)} variant="outline" className="flex-1 font-semibold">
+                   THIS PERSON
+                 </Button>
+                 <Button onClick={() => checkInFullTeam(pendingTeamScan.teamId)} className="flex-1 font-semibold shadow-md">
+                   FULL TEAM
+                 </Button>
+               </div>
+               <Button onClick={() => { setPendingTeamScan(null); startScanner(); }} variant="ghost" className="w-full mt-4 text-xs text-muted-foreground">Cancel</Button>
+            </div>
+          )}
+
           {/* Scan Result */}
-          {scanResult && (
+          {scanResult && !pendingTeamScan && (
             <div className={`p-6 rounded-xl w-full border-2 ${resultBorderClass}`}>
               <div className="flex flex-col items-center gap-3">
                 {resultIcon}

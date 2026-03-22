@@ -141,15 +141,47 @@ const AdminReconciliation = () => {
   const EVENT_CODE_MAP: Record<string, string> = {
     "reverseimageprompting": "SXDT",
     "turingtest": "SXAI",
-    "solarsisx": "SXMAIN"
+    "escapeandexploit": "CYEE",
+    "zerodayarena": "CYZA",
+    "codeconundrum": "CSCC",
+    "techescapequest": "CSTE",
+    "versioncontrolwars": "CSVW",
+    "datadecoded": "DSDD",
+    "killswitchprotocol": "DSKP",
+    "dataroyale": "DSDR",
+    "innovatrium": "ECEI",
+    "embeddedescaperoom": "ECEE",
+    "bugbuster": "ECEB",
+    "electroquizcircuitrix": "EEEC",
+    "electraforge": "EEEF",
+    "datatodashboardsdgedition": "ISEDD",
+    "ideathonarena": "MCAI",
+    "iotnexus": "MCAIOT",
+    "rccarracing": "MECHRC",
+    "robowars": "MECHRW",
+    "designdecidedominate": "CIVDD",
+    "bridgeit": "CIVBI",
+    "biznova": "MBAB",
+    "valorant": "GMVAL",
+    "bgmi": "GMBG"
   };
 
-  const generatePrefix = (event: string, track: string) => {
-    const key = normalizeEvent(event);
-    if (EVENT_CODE_MAP[key]) return EVENT_CODE_MAP[key];
-    const e = (event || '').toUpperCase().split(' ').map(w => w[0]).join('').slice(0, 2);
-    const t = (track || '').toUpperCase().split(' ').map(w => w[0]).join('').slice(0, 2);
-    return (e + t).padEnd(4, 'X');
+  const SOLARIS_TRACK_MAP: Record<string, string> = {
+    "developertoolsengineeringproductivity": "SXDT",
+    "mcpbasedsystemsengineeringintelligentsystems": "SXMCP",
+    "agenticaibasedautomatedsystemsengineeringintelligentexecution": "SXAI"
+  };
+
+  const generateEventCode = (event: string, track: string) => {
+    const e = cleanText(event);
+    const t = cleanText(track);
+
+    // 🔥 Solaris special handling
+    if (e.includes("solarsisx") || e.includes("solarisx")) {
+      return SOLARIS_TRACK_MAP[t] || "SXGEN";
+    }
+
+    return EVENT_CODE_MAP[e] || "GENX";
   };
 
   const readExcel = async (file: File): Promise<any[]> => {
@@ -207,14 +239,14 @@ const AdminReconciliation = () => {
       const flattened: FinalParticipant[] = [];
       let totReg = 0, totPay = 0, pendPay = 0, rev = 0;
       const evRev: Record<string, number> = {};
-      const counters: Record<string, number> = {};
+      const idCounters: Record<string, number> = {};
       const usedPayments = new Set<string>();
 
-      const getId = (eventName: string, track: string) => {
-        const prefix = generatePrefix(eventName, track);
-        if (!counters[prefix]) counters[prefix] = 1;
-        const id = `${prefix}${String(counters[prefix]).padStart(3, '0')}`;
-        counters[prefix]++;
+      const generateTeamId = (event: string, track: string) => {
+        const prefix = generateEventCode(event, track);
+        if (!idCounters[prefix]) idCounters[prefix] = 1;
+        const id = `${prefix}${String(idCounters[prefix]).padStart(3, '0')}`;
+        idCounters[prefix]++;
         return id;
       };
 
@@ -254,13 +286,13 @@ const AdminReconciliation = () => {
           }
         }
 
-        const teamId = getId(event_name, first.track || first.track_name || '');
+        const teamId = generateTeamId(event_name, first.track || first.track_name || '');
 
         team.forEach((p, index) => {
-          const participantId = `${teamId}-${index + 1}`;
+          const memberSuffix = String.fromCharCode(65 + index); // A, B, C
           
           flattened.push({
-            id: participantId,
+            id: `${teamId}${memberSuffix}`,
             team_id: teamId,
             name: p.name || '',
             email: p.email || '',
@@ -407,7 +439,7 @@ const AdminReconciliation = () => {
           track_id: tr?.id || null,
           amount_paid: r.amount_paid,
           payment_status: r.status,
-          qr_token: crypto.randomUUID(),
+          qr_token: JSON.stringify({ participant_id: r.id, team_id: r.team_id }),
           checked_in: false,
           checked_in_at: null
         };

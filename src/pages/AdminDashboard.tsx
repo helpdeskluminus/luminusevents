@@ -276,7 +276,12 @@ const AdminDashboard = () => {
   };
 
   const downloadQR = async (participant: Participant) => {
-    const payload = JSON.stringify({ participant_id: participant.id, event_id: participant.event_id, qr_token: participant.qr_token });
+    let payload = '';
+    if (participant.qr_token && participant.qr_token.includes('team_id')) {
+      payload = participant.qr_token;
+    } else {
+      payload = JSON.stringify({ participant_id: participant.id, event_id: participant.event_id, qr_token: participant.qr_token });
+    }
     const url = await QRCode.toDataURL(payload, { width: 400, margin: 2 });
     const a = document.createElement('a');
     a.href = url; a.download = `qr-${participant.name.replace(/\s+/g, '-')}.png`; a.click();
