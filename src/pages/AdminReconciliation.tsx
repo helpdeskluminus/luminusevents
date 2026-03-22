@@ -25,6 +25,7 @@ interface ParsedBillDeskRow {
 
 interface FinalParticipant {
   id: string;
+  team_id: string;
   name: string;
   email: string;
   phone: string;
@@ -79,48 +80,59 @@ const AdminReconciliation = () => {
     return null;
   };
 
-  const clean = (val: any) => String(val || '').toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9@.]/g, '').trim();
-  const cleanName = (val: any) => String(val || '').toLowerCase().replace(/[^a-z]/g, '');
-  const cleanPhone = (val: any) => String(val || '').replace(/[^0-9]/g, '');
   const cleanEmail = (val: any) => String(val || '').toLowerCase().trim();
-  const cleanEvent = (val: any) => String(val || '').toLowerCase().replace(/rs\s*\d+/g, '').replace(/[^a-z]/g, '');
+  const cleanPhone = (val: any) => String(val || '').replace(/\D/g, '').slice(-10);
+  const cleanText = (val: any) => String(val || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-  const getLevenshteinDistance = (a: string, b: string) => {
-    const matrix = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
-    for (let i = 0; i <= a.length; i++) matrix[i][0] = i;
-    for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
-    for (let i = 1; i <= a.length; i++) {
-      for (let j = 1; j <= b.length; j++) {
-        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-        matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
+  const normalizeEvent = (val: any) => {
+    return cleanText(
+      String(val || '').replace(/- rs.*$/i, '').replace(/\(.*?\)/g, '').replace(/luminus.*$/i, '')
+    );
+  };
+
+  const levenshtein = (a: string, b: string) => {
+    const matrix = Array.from({ length: b.length + 1 }, () => [] as number[]);
+    for (let i = 0; i <= b.length; i++) matrix[i][0] = i;
+    for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+
+    for (let i = 1; i <= b.length; i++) {
+      for (let j = 1; j <= a.length; j++) {
+        if (b[i - 1] === a[j - 1]) matrix[i][j] = matrix[i - 1][j - 1];
+        else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1,
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j] + 1
+          );
+        }
       }
     }
-    return matrix[a.length][b.length];
+    return matrix[b.length][a.length];
   };
 
-  const getSimilarity = (a: string, b: string) => {
+  const nameSimilarity = (a: string, b: string) => {
     if (!a || !b) return 0;
-    const distance = getLevenshteinDistance(a, b);
-    const maxLength = Math.max(a.length, b.length);
-    return (maxLength - distance) / maxLength;
+    const dist = levenshtein(a, b);
+    return 1 - dist / Math.max(a.length, b.length);
   };
 
-  const scoreMatch = (b: any, p: any, event_name: string) => {
+  const getMatchScore = (bill: any, participant: any, event_name: string) => {
     let score = 0;
-    
-    // PRIMARY MATCH
-    if (b.email && cleanEmail(p.email) === b.email) score += 60;
-    if (b.phone && cleanPhone(p.phoneNumber || p.phone) === b.phone) score += 40;
 
-    // SECONDARY MATCH
-    const nameA = cleanName(p.name);
-    if (b.name && nameA) {
-      if (getSimilarity(nameA, b.name) >= 0.7 || nameA.includes(b.name) || b.name.includes(nameA)) score += 20;
-    }
+    const pEmail = cleanEmail(participant.email);
+    const pPhone = cleanPhone(participant.phoneNumber || participant.phone);
+    const pName = cleanText(participant.name);
+    const pEvent = normalizeEvent(event_name);
 
-    const eventA = cleanEvent(event_name);
-    if (b.event && eventA) {
-      if (eventA.includes(b.event) || b.event.includes(eventA)) score += 30;
+    if (bill.email && pEmail === bill.email) score += 60;
+    if (bill.phone && pPhone === bill.phone) score += 50;
+
+    const similarity = nameSimilarity(pName, bill.name);
+    if (similarity > 0.8) score += 25;
+    else if (similarity > 0.6) score += 15;
+
+    if (bill.event && (pEvent.includes(bill.event) || bill.event.includes(pEvent))) {
+      score += 30;
     }
 
     return score;
@@ -133,6 +145,8 @@ const AdminReconciliation = () => {
   };
 
   const generatePrefix = (event: string, track: string) => {
+    const key = normalizeEvent(event);
+    if (EVENT_CODE_MAP[key]) return EVENT_CODE_MAP[key];
     const e = (event || '').toUpperCase().split(' ').map(w => w[0]).join('').slice(0, 2);
     const t = (track || '').toUpperCase().split(' ').map(w => w[0]).join('').slice(0, 2);
     return (e + t).padEnd(4, 'X');
@@ -157,20 +171,12 @@ const AdminReconciliation = () => {
       const bdData = await readExcel(billdeskFile);
       const bdRows = bdData.map(raw => {
         const row = buildRowMapper(raw);
-
-        const status = clean(getValue(row, ["status", "transactionstatus"]));
-        const email = cleanEmail(getValue(row, ["emailid", "email", "customeremail", "payeremail"]));
-        const phone = cleanPhone(getValue(row, ["mobileno", "phone", "contactnumber"]));
-        const name = cleanName(getValue(row, ["teamleadername", "name", "participantname", "customername"]));
-
-        const amount = parseFloat(
-          String(getValue(row, ["paidamount", "transactionamount", "txnamount", "amount"]) || "0")
-            .replace(/[^\d.-]/g, "")
-        ) || 0;
-
-        const rawEvent = getValue(row, ["eventname", "event"]) || "";
-        const event = cleanEvent(rawEvent);
-
+        const email = cleanEmail(getValue(row, ["emailid", "email"]));
+        const phone = cleanPhone(getValue(row, ["mobileno", "phone"]));
+        const name = cleanText(getValue(row, ["teamleadername", "name"]));
+        const amount = parseFloat(String(getValue(row, ["paidamount", "transactionamount", "amount"]) || "0").replace(/[^\d.-]/g, "")) || 0;
+        const event = normalizeEvent(getValue(row, ["eventname", "event"]));
+        const status = cleanText(getValue(row, ["status", "transactionstatus"]));
         return {
           email, phone, name, amount, event,
           valid: status === "success" || status === ""
@@ -205,59 +211,57 @@ const AdminReconciliation = () => {
       const usedPayments = new Set<string>();
 
       const getId = (eventName: string, track: string) => {
-        const key = EVENT_CODE_MAP[clean(eventName)] || generatePrefix(eventName, track);
-        if (!counters[key]) counters[key] = 1;
-        const id = `${key}${String(counters[key]).padStart(3, '0')}`;
-        counters[key]++;
+        const prefix = generatePrefix(eventName, track);
+        if (!counters[prefix]) counters[prefix] = 1;
+        const id = `${prefix}${String(counters[prefix]).padStart(3, '0')}`;
+        counters[prefix]++;
         return id;
       };
 
       sbRows.forEach(teamRow => {
-        if (!teamRow.participants || teamRow.participants.length === 0) return;
+        if (!teamRow.participants?.length) return;
 
         const team = teamRow.participants;
-        const firstParticipant = team[0];
+        const first = team[0];
         const event_name = String(teamRow.team_id || '').trim();
-        const expectedAmount = Number(teamRow.expected_fee);
+        const expected = Number(teamRow.expected_fee);
 
-        // Score Matching
-        const match = bdRows
-          .map(b => ({ ...b, score: scoreMatch(b, firstParticipant, event_name) }))
-          .filter(b => b.score >= 50)
-          .sort((a, b) => b.score - a.score)[0];
+        // 🔥 FIND BEST MATCH
+        const scored = bdRows.map(b => ({
+          ...b,
+          score: getMatchScore(b, first, event_name)
+        }));
+
+        const best = scored.sort((a, b) => b.score - a.score)[0];
 
         let status = "NOT PAID";
-        let amount_paid = 0;
-        let match_confidence = 0;
-        let fraud_flag = "CLEAN";
+        let paid = 0;
+        let confidence = 0;
+        let fraud = "CLEAN";
 
-        if (match) {
-          amount_paid = match.amount;
-          match_confidence = match.score;
-          const key = `${match.email}-${match.phone}-${match.amount}`;
-
+        if (best && best.score >= 40) {
+          const key = `${best.email}-${best.phone}-${best.amount}`;
           if (usedPayments.has(key)) {
-            status = "DUPLICATE PAYMENT";
-            fraud_flag = "FRAUD";
+            fraud = "DUPLICATE PAYMENT";
+            status = "REVIEW REQUIRED";
           } else {
             usedPayments.add(key);
-            if (amount_paid !== expectedAmount) {
-              status = "AMOUNT MISMATCH";
-              fraud_flag = "PROBABLE";
-            } else if (match_confidence >= 80) {
-              status = "PAID";
-            } else if (match_confidence >= 50 && match_confidence < 80) {
-              status = "REVIEW REQUIRED";
-              fraud_flag = "PROBABLE";
-            } else {
-               status = "NOT PAID";
-            }
+            paid = best.amount;
+            confidence = best.score;
+
+            if (paid === expected) status = "PAID";
+            else status = "AMOUNT MISMATCH";
           }
         }
 
-        team.forEach(p => {
+        const teamId = getId(event_name, first.track || first.track_name || '');
+
+        team.forEach((p, index) => {
+          const participantId = `${teamId}-${index + 1}`;
+          
           flattened.push({
-            id: getId(event_name, p.track || p.track_name || ''),
+            id: participantId,
+            team_id: teamId,
             name: p.name || '',
             email: p.email || '',
             phone: p.phoneNumber || p.phone || '',
@@ -265,12 +269,12 @@ const AdminReconciliation = () => {
             college: p.collegeName || p.college || '',
             event: event_name,
             track: p.track || p.track_name || '',
-            amount_paid: amount_paid,
-            expected_fee: expectedAmount,
+            amount_paid: paid,
+            expected_fee: expected,
             status: status,
-            match_confidence: match_confidence,
-            fraud_flag: fraud_flag,
-            matched_by: match ? `AI Score (${match_confidence})` : 'No Match'
+            match_confidence: confidence,
+            fraud_flag: fraud,
+            matched_by: confidence ? `AI Engine (${confidence})` : 'No Match'
           });
 
           totReg++;
@@ -278,8 +282,8 @@ const AdminReconciliation = () => {
 
         if (status === 'PAID') {
           totPay++;
-          rev += amount_paid;
-          evRev[event_name] = (evRev[event_name] || 0) + amount_paid;
+          rev += paid;
+          evRev[event_name] = (evRev[event_name] || 0) + paid;
         } else if (status === 'REVIEW REQUIRED' || status === 'AMOUNT MISMATCH') {
           pendPay++; // Tracked separately or pending
         } else {
@@ -342,7 +346,8 @@ const AdminReconciliation = () => {
       });
 
       const sheetData = data.map(r => ({
-        ID: r.id,
+        'Team Member ID': r.id,
+        'Team ID': r.team_id,
         Name: r.name,
         Email: r.email,
         Phone: r.phone,
@@ -389,8 +394,8 @@ const AdminReconciliation = () => {
 
       const toInsert = validParticipants.map(r => {
         // Find matching event ID (fuzzy)
-        const ev = events?.find(e => clean(e.name).includes(clean(r.event)) || clean(r.event).includes(clean(e.name)));
-        const tr = tracks?.find(t => t.event_id === ev?.id && (clean(t.name).includes(clean(r.track)) || clean(r.track).includes(clean(t.name))));
+        const ev = events?.find(e => cleanText(e.name).includes(cleanText(r.event)) || cleanText(r.event).includes(cleanText(e.name)));
+        const tr = tracks?.find(t => t.event_id === ev?.id && (cleanText(t.name).includes(cleanText(r.track)) || cleanText(r.track).includes(cleanText(t.name))));
         
         return {
           name: r.name,
@@ -566,7 +571,8 @@ const AdminReconciliation = () => {
                 <table className="w-full text-left text-sm whitespace-nowrap">
                   <thead className="bg-secondary/50">
                     <tr>
-                      <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">ID</th>
+                      <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Member ID</th>
+                      <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Team ID</th>
                       <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Name</th>
                       <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Email</th>
                       <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Phone</th>
@@ -579,8 +585,9 @@ const AdminReconciliation = () => {
                   </thead>
                   <tbody className="divide-y divide-border font-body">
                     {results.slice(0, 100).map((r, i) => (
-                      <tr key={i} className={`hover:bg-secondary/30 transition-colors ${r.fraud_flag === 'FRAUD' ? 'bg-destructive/5' : ''}`}>
+                      <tr key={i} className={`hover:bg-secondary/30 transition-colors ${r.fraud_flag === 'FRAUD' || r.fraud_flag === 'DUPLICATE PAYMENT' ? 'bg-destructive/5' : ''}`}>
                         <td className="px-4 py-3 text-xs font-bold font-mono text-primary">{r.id}</td>
+                        <td className="px-4 py-3 text-xs font-bold font-mono text-muted-foreground">{r.team_id}</td>
                         <td className="px-4 py-3 text-xs font-medium text-foreground">{r.name || '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted-foreground">{r.email || '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted-foreground">{r.phone || '—'}</td>
