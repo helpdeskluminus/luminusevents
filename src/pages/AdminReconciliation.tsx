@@ -24,6 +24,7 @@ interface ParsedBillDeskRow {
 }
 
 interface FinalParticipant {
+  id: string;
   name: string;
   email: string;
   phone: string;
@@ -64,6 +65,18 @@ const AdminReconciliation = () => {
 
   const normalizeString = (str: any) => String(str || '').trim().toLowerCase();
   const normalize = (v: any) => String(v || '').toLowerCase().replace(/\s+/g, "");
+
+  const EVENT_CODE_MAP: Record<string, string> = {
+    "reverse image prompting": "SXRP",
+    "turing test": "SXAI",
+    "mcp based systems": "SXMS"
+  };
+
+  const generatePrefix = (event: string, track: string) => {
+    const e = (event || '').toUpperCase().split(' ').map(w => w[0]).join('').slice(0, 2);
+    const t = (track || '').toUpperCase().split(' ').map(w => w[0]).join('').slice(0, 2);
+    return (e + t).padEnd(4, 'X');
+  };
 
   const readExcel = async (file: File): Promise<any[]> => {
     const buffer = await file.arrayBuffer();
@@ -147,6 +160,7 @@ const AdminReconciliation = () => {
       let pendPay = 0;
       let rev = 0;
       const evRev: Record<string, number> = {};
+      const eventCounters: Record<string, number> = {};
 
       sbRows.forEach(teamRow => {
         if (!teamRow.participants || teamRow.participants.length === 0) return;
@@ -193,7 +207,13 @@ const AdminReconciliation = () => {
 
         // 9. FINAL OUTPUT (Flatten team but attach same payment)
         team.forEach(p => {
+          const prefix = EVENT_CODE_MAP[normalizeString(event_name)] || generatePrefix(event_name, p.track || p.track_name || '');
+          if (!eventCounters[prefix]) eventCounters[prefix] = 1;
+          const id = `${prefix}${String(eventCounters[prefix]).padStart(3, '0')}`;
+          eventCounters[prefix]++;
+
           flattened.push({
+            id,
             name: p.name || '',
             email: p.email || '',
             phone: p.phoneNumber || p.phone || '',
@@ -274,6 +294,7 @@ const AdminReconciliation = () => {
       });
 
       const sheetData = data.map(r => ({
+        ID: r.id,
         Name: r.name,
         Email: r.email,
         Phone: r.phone,
@@ -495,6 +516,7 @@ const AdminReconciliation = () => {
                 <table className="w-full text-left text-sm whitespace-nowrap">
                   <thead className="bg-secondary/50">
                     <tr>
+                      <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">ID</th>
                       <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Name</th>
                       <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Email</th>
                       <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Phone</th>
@@ -507,6 +529,7 @@ const AdminReconciliation = () => {
                   <tbody className="divide-y divide-border font-body">
                     {results.slice(0, 100).map((r, i) => (
                       <tr key={i} className="hover:bg-secondary/30 transition-colors">
+                        <td className="px-4 py-3 text-xs font-bold font-mono text-primary">{r.id}</td>
                         <td className="px-4 py-3 text-xs font-medium text-foreground">{r.name || '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted-foreground">{r.email || '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted-foreground">{r.phone || '—'}</td>
