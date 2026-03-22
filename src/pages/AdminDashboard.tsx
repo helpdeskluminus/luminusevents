@@ -22,7 +22,14 @@ interface Event {
   name: string;
   date: string;
   location: string;
+  registration_fee: number;
   created_at: string;
+}
+
+interface Track {
+  id: string;
+  name: string;
+  event_id: string;
 }
 
 interface AppUser {
@@ -40,6 +47,11 @@ interface Participant {
   email: string | null;
   phone: string | null;
   event_id: string;
+  track_id: string | null;
+  usn: string | null;
+  college: string | null;
+  amount_paid: number;
+  payment_status: string;
   qr_token: string;
   checked_in: boolean;
   checked_in_at: string | null;
@@ -54,10 +66,14 @@ const AdminDashboard = () => {
   const [events, setEvents] = useState<Event[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [globalStats, setGlobalStats] = useState({ total: 0, checkedIn: 0, pending: 0, revenue: 0 });
   const [selectedEventId, setSelectedEventId] = useState<string>('');
   const [eventName, setEventName] = useState('');
   const [eventDate, setEventDate] = useState('');
   const [eventLocation, setEventLocation] = useState('');
+  const [eventFee, setEventFee] = useState('');
+  const [trackName, setTrackName] = useState('');
 
   useEffect(() => {
     if (!loading && !user) navigate('/auth', { replace: true });
@@ -75,38 +91,60 @@ const AdminDashboard = () => {
     if (data) setUsers(data as unknown as AppUser[]);
   }, []);
 
+  const fetchGlobalStats = useCallback(async () => {
+    const { data } = await supabase.from('participants').select('checked_in, amount_paid, payment_status');
+    if (data) {
+      const total = data.length;
+      const checkedIn = data.filter(p => p.checked_in).length;
+      const pending = data.filter(p => p.payment_status === 'PENDING' || p.payment_status === 'NOT PAID').length;
+      const revenue = data.reduce((sum, p) => sum + (Number(p.amount_paid) || 0), 0);
+      setGlobalStats({ total, checkedIn, pending, revenue });
+    }
+  }, []);
+
   const fetchParticipants = useCallback(async (eventId: string) => {
     const { data } = await supabase.from('participants').select('*').eq('event_id', eventId).order('name');
     if (data) setParticipants(data as unknown as Participant[]);
+  }, []);
+
+  const fetchTracks = useCallback(async (eventId: string) => {
+    const { data } = await supabase.from('tracks').select('*').eq('event_id', eventId).order('created_at');
+    if (data) setTracks(data as unknown as Track[]);
   }, []);
 
   useEffect(() => {
     if (profile?.role === 'admin') {
       fetchEvents();
       fetchUsers();
+      fetchGlobalStats();
     }
-  }, [profile, fetchEvents, fetchUsers]);
+  }, [profile, fetchEvents, fetchUsers, fetchGlobalStats]);
 
   useEffect(() => {
-    if (selectedEventId) fetchParticipants(selectedEventId);
-  }, [selectedEventId, fetchParticipants]);
+    if (selectedEventId) {
+      fetchParticipants(selectedEventId);
+      fetchTracks(selectedEventId);
+    }
+  }, [selectedEventId, fetchParticipants, fetchTracks]);
 
   useEffect(() => {
     const channel = supabase
       .channel('admin-participants')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'participants' }, () => {
         if (selectedEventId) fetchParticipants(selectedEventId);
+        fetchGlobalStats();
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [selectedEventId, fetchParticipants]);
+  }, [selectedEventId, fetchParticipants, fetchGlobalStats]);
 
   const createEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = await supabase.from('events').insert({ name: eventName, date: eventDate, location: eventLocation });
+    const fee = parseFloat(eventFee) || 0;
+    const { error } = await supabase.from('events').insert({ name: eventName, date: eventDate, location: eventLocation, registration_fee: fee });
     if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
     toast({ title: 'Event created' });
-    setEventName(''); setEventDate(''); setEventLocation('');
+    setEventName(''); setEventDate(''); setEventLocation(''); setEventFee('');
     fetchEvents();
   };
 
@@ -114,7 +152,23 @@ const AdminDashboard = () => {
     const { error } = await supabase.from('events').delete().eq('id', id);
     if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
     fetchEvents();
-    if (selectedEventId === id) { setSelectedEventId(''); setParticipants([]); }
+    if (selectedEventId === id) { setSelectedEventId(''); setParticipants([]); setTracks([]); }
+  };
+
+  const createTrack = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEventId) return;
+    const { error } = await supabase.from('tracks').insert({ name: trackName, event_id: selectedEventId });
+    if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
+    toast({ title: 'Track created' });
+    setTrackName('');
+    fetchTracks(selectedEventId);
+  };
+
+  const deleteTrack = async (id: string) => {
+    const { error } = await supabase.from('tracks').delete().eq('id', id);
+    if (error) { toast({ title: 'Error', description: error.message, variant: 'destructive' }); return; }
+    fetchTracks(selectedEventId);
   };
 
   const updateUserApproval = async (userId: string, status: string) => {
@@ -210,9 +264,9 @@ const AdminDashboard = () => {
 
   const exportParticipants = () => {
     if (!participants.length) return;
-    const csv = ['Name,Email,Phone,QR Token,Checked In,Checked In At']
+    const csv = ['Name,Email,Phone,USN,College,Track,Payment Status,Amount Paid,QR Token,Checked In,Checked In At']
       .concat(participants.map(p =>
-        `"${p.name}","${p.email || ''}","${p.phone || ''}","${p.qr_token}",${p.checked_in},"${p.checked_in_at || ''}"`
+        `"${p.name}","${p.email || ''}","${p.phone || ''}","${p.usn || ''}","${p.college || ''}","${tracks.find(t => t.id === p.track_id)?.name || ''}","${p.payment_status}",${p.amount_paid || 0},"${p.qr_token}",${p.checked_in},"${p.checked_in_at || ''}"`
       )).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -230,9 +284,10 @@ const AdminDashboard = () => {
 
   const downloadAllQRs = async () => {
     if (!participants.length) return;
+    toast({ title: 'Generating QR Codes...', description: 'This may take a moment.' });
     for (const p of participants) {
       await downloadQR(p);
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(r => setTimeout(r, 100)); // avoid rate limits / browser block
     }
     toast({ title: 'QR codes downloaded', description: `${participants.length} QR codes generated.` });
   };
@@ -240,6 +295,7 @@ const AdminDashboard = () => {
   const checkedIn = participants.filter(p => p.checked_in).length;
   const total = participants.length;
   const pendingUsers = users.filter(u => u.approval_status === 'pending').length;
+  const totalRevenue = participants.reduce((sum, p) => sum + (Number(p.amount_paid) || 0), 0);
 
   if (loading || (user && !profile)) {
     return (
@@ -270,23 +326,27 @@ const AdminDashboard = () => {
           </p>
         </div>
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        {/* Quick Stats (Global) */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+          <div className="p-4 rounded-xl border border-border bg-card">
+            <p className="text-3xl font-bold text-foreground">{globalStats.total}</p>
+            <p className="text-xs text-muted-foreground font-body mt-1">Total Participants</p>
+          </div>
+          <div className="p-4 rounded-xl border border-border bg-card">
+            <p className="text-3xl font-bold text-success">{globalStats.checkedIn}</p>
+            <p className="text-xs text-muted-foreground font-body mt-1">Total Checked-In</p>
+          </div>
+          <div className="p-4 rounded-xl border border-border bg-card">
+            <p className="text-3xl font-bold text-amber-500">{globalStats.pending}</p>
+            <p className="text-xs text-muted-foreground font-body mt-1">Pending Payments</p>
+          </div>
+          <div className="p-4 rounded-xl border border-border bg-card">
+            <p className="text-3xl font-bold text-primary">₹{globalStats.revenue}</p>
+            <p className="text-xs text-muted-foreground font-body mt-1">Global Revenue</p>
+          </div>
           <div className="p-4 rounded-xl border border-border bg-card">
             <p className="text-3xl font-bold text-foreground">{events.length}</p>
-            <p className="text-xs text-muted-foreground font-body mt-1">Events</p>
-          </div>
-          <div className="p-4 rounded-xl border border-border bg-card">
-            <p className="text-3xl font-bold text-foreground">{users.length}</p>
-            <p className="text-xs text-muted-foreground font-body mt-1">Users</p>
-          </div>
-          <div className="p-4 rounded-xl border border-border bg-card">
-            <p className="text-3xl font-bold text-primary">{pendingUsers}</p>
-            <p className="text-xs text-muted-foreground font-body mt-1">Pending Approval</p>
-          </div>
-          <div className="p-4 rounded-xl border border-border bg-card">
-            <p className="text-3xl font-bold text-success">{checkedIn}/{total}</p>
-            <p className="text-xs text-muted-foreground font-body mt-1">Checked In</p>
+            <p className="text-xs text-muted-foreground font-body mt-1">Total Events</p>
           </div>
         </div>
 
@@ -314,6 +374,7 @@ const AdminDashboard = () => {
                 <Input placeholder="Event name" value={eventName} onChange={e => setEventName(e.target.value)} required className="h-10 rounded-full px-4 bg-secondary flex-1 min-w-[200px] font-body" />
                 <Input type="datetime-local" value={eventDate} onChange={e => setEventDate(e.target.value)} required className="h-10 rounded-full px-4 bg-secondary w-auto font-body" />
                 <Input placeholder="Location" value={eventLocation} onChange={e => setEventLocation(e.target.value)} required className="h-10 rounded-full px-4 bg-secondary flex-1 min-w-[150px] font-body" />
+                <Input type="number" placeholder="Fee (e.g. 500)" value={eventFee} onChange={e => setEventFee(e.target.value)} className="h-10 rounded-full px-4 bg-secondary flex-1 min-w-[120px] font-body" />
                 <Button type="submit" className="rounded-full h-10 px-6 text-xs font-semibold tracking-wider gap-1">
                   <Plus className="h-4 w-4" /> CREATE
                 </Button>
@@ -329,7 +390,7 @@ const AdminDashboard = () => {
                     </div>
                     <div>
                       <p className="font-semibold text-foreground">{event.name}</p>
-                      <p className="text-xs text-muted-foreground font-body">{new Date(event.date).toLocaleString()} · {event.location}</p>
+                      <p className="text-xs text-muted-foreground font-body">{new Date(event.date).toLocaleString()} · {event.location} · ₹{event.registration_fee || 0}</p>
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -353,6 +414,29 @@ const AdminDashboard = () => {
                 </div>
               )}
             </div>
+
+            {selectedEventId && (
+              <div className="mt-8 p-6 rounded-xl border border-border bg-card space-y-4">
+                <h3 className="text-sm font-semibold tracking-wider text-foreground uppercase">Create Track for Selected Event</h3>
+                <form onSubmit={createTrack} className="flex gap-3 flex-wrap items-end">
+                  <Input placeholder="Track name (e.g. AI Agents)" value={trackName} onChange={e => setTrackName(e.target.value)} required className="h-10 rounded-full px-4 bg-secondary flex-1 font-body" />
+                  <Button type="submit" className="rounded-full h-10 px-6 text-xs font-semibold tracking-wider gap-1">
+                    <Plus className="h-4 w-4" /> ADD TRACK
+                  </Button>
+                </form>
+                <div className="grid gap-2 mt-4">
+                  {tracks.map(t => (
+                    <div key={t.id} className="flex items-center justify-between p-3 rounded-lg bg-secondary/30">
+                      <span className="font-body text-sm font-medium">{t.name}</span>
+                      <Button size="sm" variant="ghost" onClick={() => deleteTrack(t.id)} className="text-destructive hover:bg-destructive hover:text-destructive-foreground h-8 w-8 p-0 rounded-full">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  {tracks.length === 0 && <p className="text-xs text-muted-foreground font-body">No tracks created.</p>}
+                </div>
+              </div>
+            )}
           </TabsContent>
 
           {/* USERS TAB */}
@@ -473,6 +557,8 @@ const AdminDashboard = () => {
                       <th className="text-left py-3 px-4 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Name</th>
                       <th className="text-left py-3 px-4 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Email</th>
                       <th className="text-left py-3 px-4 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Phone</th>
+                      <th className="text-left py-3 px-4 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Track</th>
+                      <th className="text-left py-3 px-4 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Payment</th>
                       <th className="text-left py-3 px-4 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Status</th>
                       <th className="text-left py-3 px-4 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">QR</th>
                     </tr>
@@ -483,6 +569,11 @@ const AdminDashboard = () => {
                         <td className="py-3 px-4 text-foreground font-medium font-body text-xs">{p.name}</td>
                         <td className="py-3 px-4 text-muted-foreground font-body text-xs">{p.email || '—'}</td>
                         <td className="py-3 px-4 text-muted-foreground font-body text-xs">{p.phone || '—'}</td>
+                        <td className="py-3 px-4 text-muted-foreground font-body text-xs">{tracks.find(t => t.id === p.track_id)?.name || '—'}</td>
+                        <td className="py-3 px-4 text-muted-foreground font-body text-xs">
+                          {p.payment_status === 'PAID' ? <span className="text-success font-semibold">PAID</span> : <span className="text-amber-500 font-semibold">{p.payment_status}</span>}
+                          {p.amount_paid > 0 && ` (₹${p.amount_paid})`}
+                        </td>
                         <td className="py-3 px-4">
                           {p.checked_in ? (
                             <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-success/10 text-success font-semibold">
@@ -538,8 +629,8 @@ const AdminDashboard = () => {
                   <p className="text-xs text-muted-foreground font-body mt-2 uppercase tracking-wider">Checked In</p>
                 </div>
                 <div className="p-8 rounded-xl border border-border bg-card text-center">
-                  <p className="text-5xl font-bold text-primary">{total > 0 ? Math.round((checkedIn / total) * 100) : 0}%</p>
-                  <p className="text-xs text-muted-foreground font-body mt-2 uppercase tracking-wider">Rate</p>
+                  <p className="text-5xl font-bold text-primary">₹{totalRevenue}</p>
+                  <p className="text-xs text-muted-foreground font-body mt-2 uppercase tracking-wider">Revenue</p>
                 </div>
               </div>
             )}
