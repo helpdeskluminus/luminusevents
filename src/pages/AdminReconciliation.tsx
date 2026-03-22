@@ -63,13 +63,45 @@ const AdminReconciliation = () => {
     if (!loading && user && profile && profile.role !== 'admin') navigate('/', { replace: true });
   }, [user, profile, loading, navigate]);
 
-  const normalizeString = (str: any) => String(str || '').trim().toLowerCase();
-  const normalize = (v: any) => String(v || '').toLowerCase().replace(/\s+/g, "");
+  const normalizeKey = (k: string) => k.toLowerCase().replace(/\s+/g, '').replace(/[^a-z]/g, '');
+  const buildRowMapper = (row: any) => {
+    const map: Record<string, any> = {};
+    Object.keys(row).forEach(k => { map[normalizeKey(k)] = row[k]; });
+    return map;
+  };
+
+  const getValue = (map: any, possibleKeys: string[]) => {
+    for (const key of possibleKeys) {
+      const val = map[normalizeKey(key)];
+      if (val !== undefined && val !== "") return val;
+    }
+    return null;
+  };
+
+  const clean = (val: any) => String(val || '').toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9@.]/g, '').trim();
+  const cleanName = (val: any) => String(val || '').toLowerCase().replace(/[^a-z]/g, '');
+
+  const scoreMatch = (b: any, p: any, event_name: string) => {
+    let score = 0;
+    if (b.email && clean(p.email) === b.email) score += 50;
+    if (b.phone && clean(p.phoneNumber || p.phone) === b.phone) score += 40;
+
+    const nameA = cleanName(p.name);
+    if (b.name && nameA.includes(b.name)) score += 20;
+
+    const eventMatch =
+      clean(event_name).includes(b.event) ||
+      b.event.includes(clean(event_name));
+
+    if (eventMatch) score += 30;
+
+    return score;
+  };
 
   const EVENT_CODE_MAP: Record<string, string> = {
-    "reverse image prompting": "SXRP",
-    "turing test": "SXAI",
-    "mcp based systems": "SXMS"
+    "reverseimageprompting": "SXDT",
+    "turingtest": "SXAI",
+    "solarsisx": "SXMAIN"
   };
 
   const generatePrefix = (event: string, track: string) => {
@@ -85,13 +117,6 @@ const AdminReconciliation = () => {
     return XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
   };
 
-  const getField = (row: any, keys: string[]) => {
-    for (const key of keys) {
-      if (row[key] !== undefined && row[key] !== "") return row[key];
-    }
-    return null;
-  };
-
   const processFiles = async () => {
     if (!supabaseFile || !billdeskFile) {
       toast({ title: 'Files required', description: 'Please upload both files.', variant: 'destructive' });
@@ -100,39 +125,39 @@ const AdminReconciliation = () => {
 
     setIsProcessing(true);
     try {
-      // 1. Parse BillDesk & Filter Valid Payments
+      // 1. Parse BillDesk
       const bdData = await readExcel(billdeskFile);
-      const bdRows: ParsedBillDeskRow[] = bdData
-        .filter(row => {
-          const status = normalize(getField(row, ["status", "Status", "Transaction Status"]));
-          // If status column doesn't match success, or isn't present, assume success if no status col?
-          // Prompt strictly states: return status === "success"
-          return status === "success";
-        })
-        .map(row => {
-          const email = normalize(getField(row, ["email", "Email", "Email ID", "Customer Email", "Payer Email"]));
-          const phone = normalize(getField(row, ["phone", "Phone", "Mobile", "Mobile No", "Contact Number"]));
-          const rawName = getField(row, ["name", "Name", "Participant Name", "Customer Name"]);
-          const name = normalizeString(String(rawName || ""));
-          const amountStr = getField(row, ["amount", "Amount", "Paid Amount", "Txn Amount", "Transaction Amount"]);
-          const amount = parseFloat(String(amountStr || '0').replace(/[^\d.-]/g, '')) || 0;
-          
-          const rawEvent = getField(row, ["EVENT NAME", "Event", "Event Name"]);
-          const event = String(rawEvent || "")
-            .toLowerCase()
-            .replace(/- rs\..*$/, "")
-            .replace(/- rs.*$/, "")
-            .trim();
+      const bdRows = bdData.map(raw => {
+        const row = buildRowMapper(raw);
 
-          return { email, phone, name, amount, event, matched: false };
-        });
+        const status = clean(getValue(row, ["status", "transactionstatus"]));
+        const email = clean(getValue(row, ["emailid", "email", "customeremail", "payeremail"]));
+        const phone = clean(getValue(row, ["mobileno", "phone", "contactnumber"]));
+        const name = cleanName(getValue(row, ["teamleadername", "name", "participantname", "customername"]));
+
+        const amount = parseFloat(
+          String(getValue(row, ["paidamount", "transactionamount", "txnamount", "amount"]) || "0")
+            .replace(/[^\d.-]/g, "")
+        ) || 0;
+
+        const rawEvent = getValue(row, ["eventname", "event"]) || "";
+        const event = clean(
+          String(rawEvent)
+            .replace(/- rs.*$/i, "")
+            .replace(/luminus.*$/i, "")
+        );
+
+        return {
+          email, phone, name, amount, event,
+          valid: status === "success" || status === ""
+        };
+      }).filter(r => r.valid);
 
       // 2. Parse Supabase
       const sbData = await readExcel(supabaseFile);
       const sbRows: ParsedSupabaseRow[] = sbData.map(row => {
         let participants = [];
         try {
-          // Parse JSON directly as specified
           if (row.participants) {
              participants = typeof row.participants === 'string' ? JSON.parse(row.participants) : row.participants;
              if (!Array.isArray(participants)) participants = [participants];
@@ -145,75 +170,59 @@ const AdminReconciliation = () => {
         }
 
         const expected_fee = Number(row.registration_fee || row.fee || row.amount || 0);
-        
-        return { 
-           participants, 
-           expected_fee,
-           team_id: row.event_name || row.Event || '' 
-        };
+        return { participants, expected_fee, team_id: row.event_name || row.Event || '' };
       });
 
-      // 3. TEAM-BASED MATCHING & Flattening
+      // 3. MATCHING ENGINE
       const flattened: FinalParticipant[] = [];
-      let totReg = 0;
-      let totPay = 0;
-      let pendPay = 0;
-      let rev = 0;
+      let totReg = 0, totPay = 0, pendPay = 0, rev = 0;
       const evRev: Record<string, number> = {};
-      const eventCounters: Record<string, number> = {};
+      const counters: Record<string, number> = {};
+      const usedPayments = new Set<string>();
+
+      const getId = (eventName: string, track: string) => {
+        const key = EVENT_CODE_MAP[clean(eventName)] || generatePrefix(eventName, track);
+        if (!counters[key]) counters[key] = 1;
+        const id = `${key}${String(counters[key]).padStart(3, '0')}`;
+        counters[key]++;
+        return id;
+      };
 
       sbRows.forEach(teamRow => {
         if (!teamRow.participants || teamRow.participants.length === 0) return;
 
         const team = teamRow.participants;
         const firstParticipant = team[0];
-        const event_name = normalizeString(teamRow.team_id || '');
+        const event_name = String(teamRow.team_id || '').trim();
         const expectedAmount = Number(teamRow.expected_fee);
 
-        // 5. MATCHING LOGIC (Using ONLY first participant)
-        const match = bdRows.find(b => {
-          if (b.matched) return false;
+        // Score Matching
+        const match = bdRows
+          .map(b => ({ ...b, score: scoreMatch(b, firstParticipant, event_name) }))
+          .filter(b => b.score >= 50)
+          .sort((a, b) => b.score - a.score)[0];
 
-          const emailMatch = Boolean(b.email && b.email === normalize(firstParticipant.email));
-          const phoneMatch = Boolean(b.phone && b.phone === normalize(firstParticipant.phoneNumber || firstParticipant.phone));
-          const nameMatch = Boolean(b.name && normalizeString(firstParticipant.name).includes(b.name));
+        let status = "NOT PAID";
+        let amount_paid = 0;
+        let match_confidence = 0;
 
-          // 🔥 EVENT MATCH (VERY IMPORTANT)
-          const eventMatch = normalizeString(b.event).includes(event_name) ||
-                             event_name.includes(normalizeString(b.event));
-
-          return (emailMatch || phoneMatch || nameMatch) && eventMatch;
-        });
-
-        let paidAmount = 0;
         if (match) {
-          match.matched = true;
-          paidAmount = match.amount;
+          amount_paid = match.amount;
+          match_confidence = match.score;
+          const key = `${match.email}-${match.phone}-${match.amount}`;
+
+          if (usedPayments.has(key)) {
+            status = "DUPLICATE";
+          } else {
+            usedPayments.add(key);
+            if (amount_paid !== expectedAmount) status = "AMOUNT MISMATCH";
+            else status = "PAID";
+          }
         }
 
-        // 8. STATUS LOGIC
-        let status;
-        if (!match) {
-          status = "NOT PAID";
-        } else if (paidAmount !== expectedAmount) {
-          status = "AMOUNT MISMATCH";
-        } else {
-          status = "PAID";
-        }
-
-        // 10. DEBUG MODE
-        console.log("First Participant:", firstParticipant);
-        console.log("Matched Payment:", match);
-
-        // 9. FINAL OUTPUT (Flatten team but attach same payment)
         team.forEach(p => {
-          const prefix = EVENT_CODE_MAP[normalizeString(event_name)] || generatePrefix(event_name, p.track || p.track_name || '');
-          if (!eventCounters[prefix]) eventCounters[prefix] = 1;
-          const id = `${prefix}${String(eventCounters[prefix]).padStart(3, '0')}`;
-          eventCounters[prefix]++;
-
           flattened.push({
-            id,
+            id: getId(event_name, p.track || p.track_name || ''),
             name: p.name || '',
             email: p.email || '',
             phone: p.phoneNumber || p.phone || '',
@@ -221,11 +230,11 @@ const AdminReconciliation = () => {
             college: p.collegeName || p.college || '',
             event: event_name,
             track: p.track || p.track_name || '',
-            amount_paid: paidAmount, // User requested whole payment amount visible per participant
+            amount_paid: amount_paid,
             expected_fee: expectedAmount,
             status: status,
-            match_confidence: match ? 100 : 0,
-            matched_by: match ? 'First Participant Match' : ''
+            match_confidence: match_confidence,
+            matched_by: match ? `Score Engine (${match_confidence})` : 'No Match'
           });
 
           totReg++;
@@ -233,29 +242,24 @@ const AdminReconciliation = () => {
 
         if (status === 'PAID' || status === 'AMOUNT MISMATCH') {
           totPay++;
-          rev += paidAmount;
-          evRev[event_name] = (evRev[event_name] || 0) + paidAmount;
+          rev += amount_paid;
+          evRev[event_name] = (evRev[event_name] || 0) + amount_paid;
         } else {
           pendPay++;
         }
       });
 
       setResults(flattened);
-      setStats({
-        totalRegistrations: totReg,
-        totalPayments: totPay,
-        pendingPayments: pendPay,
-        revenue: rev,
-        eventRevenue: evRev
-      });
+      setStats({ totalRegistrations: totReg, totalPayments: totPay, pendingPayments: pendPay, revenue: rev, eventRevenue: evRev });
 
-      toast({ title: 'Processing Complete', description: `Matched ${flattened.length} participants.` });
+      toast({ title: 'Processing Complete', description: `Processed ${flattened.length} participants.` });
     } catch (error) {
       toast({ title: 'Processing Error', description: error instanceof Error ? error.message : 'Unknown error', variant: 'destructive' });
     } finally {
       setIsProcessing(false);
     }
   };
+
 
   const exportResults = () => {
     if (results.length === 0) return;
@@ -340,8 +344,8 @@ const AdminReconciliation = () => {
 
       const toInsert = validParticipants.map(r => {
         // Find matching event ID (fuzzy)
-        const ev = events?.find(e => normalizeString(e.name).includes(normalizeString(r.event)) || normalizeString(r.event).includes(normalizeString(e.name)));
-        const tr = tracks?.find(t => t.event_id === ev?.id && (normalizeString(t.name).includes(normalizeString(r.track)) || normalizeString(r.track).includes(normalizeString(t.name))));
+        const ev = events?.find(e => clean(e.name).includes(clean(r.event)) || clean(r.event).includes(clean(e.name)));
+        const tr = tracks?.find(t => t.event_id === ev?.id && (clean(t.name).includes(clean(r.track)) || clean(r.track).includes(clean(t.name))));
         
         return {
           name: r.name,
