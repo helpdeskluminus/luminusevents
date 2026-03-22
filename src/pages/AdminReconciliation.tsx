@@ -36,6 +36,7 @@ interface FinalParticipant {
   expected_fee: number;
   status: string;
   match_confidence: number;
+  fraud_flag: string;
   matched_by: string;
 }
 
@@ -80,20 +81,47 @@ const AdminReconciliation = () => {
 
   const clean = (val: any) => String(val || '').toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9@.]/g, '').trim();
   const cleanName = (val: any) => String(val || '').toLowerCase().replace(/[^a-z]/g, '');
+  const cleanPhone = (val: any) => String(val || '').replace(/[^0-9]/g, '');
+  const cleanEmail = (val: any) => String(val || '').toLowerCase().trim();
+  const cleanEvent = (val: any) => String(val || '').toLowerCase().replace(/rs\s*\d+/g, '').replace(/[^a-z]/g, '');
+
+  const getLevenshteinDistance = (a: string, b: string) => {
+    const matrix = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+    for (let i = 0; i <= a.length; i++) matrix[i][0] = i;
+    for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      for (let j = 1; j <= b.length; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
+      }
+    }
+    return matrix[a.length][b.length];
+  };
+
+  const getSimilarity = (a: string, b: string) => {
+    if (!a || !b) return 0;
+    const distance = getLevenshteinDistance(a, b);
+    const maxLength = Math.max(a.length, b.length);
+    return (maxLength - distance) / maxLength;
+  };
 
   const scoreMatch = (b: any, p: any, event_name: string) => {
     let score = 0;
-    if (b.email && clean(p.email) === b.email) score += 50;
-    if (b.phone && clean(p.phoneNumber || p.phone) === b.phone) score += 40;
+    
+    // PRIMARY MATCH
+    if (b.email && cleanEmail(p.email) === b.email) score += 60;
+    if (b.phone && cleanPhone(p.phoneNumber || p.phone) === b.phone) score += 40;
 
+    // SECONDARY MATCH
     const nameA = cleanName(p.name);
-    if (b.name && nameA.includes(b.name)) score += 20;
+    if (b.name && nameA) {
+      if (getSimilarity(nameA, b.name) >= 0.7 || nameA.includes(b.name) || b.name.includes(nameA)) score += 20;
+    }
 
-    const eventMatch =
-      clean(event_name).includes(b.event) ||
-      b.event.includes(clean(event_name));
-
-    if (eventMatch) score += 30;
+    const eventA = cleanEvent(event_name);
+    if (b.event && eventA) {
+      if (eventA.includes(b.event) || b.event.includes(eventA)) score += 30;
+    }
 
     return score;
   };
@@ -131,8 +159,8 @@ const AdminReconciliation = () => {
         const row = buildRowMapper(raw);
 
         const status = clean(getValue(row, ["status", "transactionstatus"]));
-        const email = clean(getValue(row, ["emailid", "email", "customeremail", "payeremail"]));
-        const phone = clean(getValue(row, ["mobileno", "phone", "contactnumber"]));
+        const email = cleanEmail(getValue(row, ["emailid", "email", "customeremail", "payeremail"]));
+        const phone = cleanPhone(getValue(row, ["mobileno", "phone", "contactnumber"]));
         const name = cleanName(getValue(row, ["teamleadername", "name", "participantname", "customername"]));
 
         const amount = parseFloat(
@@ -141,11 +169,7 @@ const AdminReconciliation = () => {
         ) || 0;
 
         const rawEvent = getValue(row, ["eventname", "event"]) || "";
-        const event = clean(
-          String(rawEvent)
-            .replace(/- rs.*$/i, "")
-            .replace(/luminus.*$/i, "")
-        );
+        const event = cleanEvent(rawEvent);
 
         return {
           email, phone, name, amount, event,
@@ -205,6 +229,7 @@ const AdminReconciliation = () => {
         let status = "NOT PAID";
         let amount_paid = 0;
         let match_confidence = 0;
+        let fraud_flag = "CLEAN";
 
         if (match) {
           amount_paid = match.amount;
@@ -212,11 +237,21 @@ const AdminReconciliation = () => {
           const key = `${match.email}-${match.phone}-${match.amount}`;
 
           if (usedPayments.has(key)) {
-            status = "DUPLICATE";
+            status = "DUPLICATE PAYMENT";
+            fraud_flag = "FRAUD";
           } else {
             usedPayments.add(key);
-            if (amount_paid !== expectedAmount) status = "AMOUNT MISMATCH";
-            else status = "PAID";
+            if (amount_paid !== expectedAmount) {
+              status = "AMOUNT MISMATCH";
+              fraud_flag = "PROBABLE";
+            } else if (match_confidence >= 80) {
+              status = "PAID";
+            } else if (match_confidence >= 50 && match_confidence < 80) {
+              status = "REVIEW REQUIRED";
+              fraud_flag = "PROBABLE";
+            } else {
+               status = "NOT PAID";
+            }
           }
         }
 
@@ -234,16 +269,19 @@ const AdminReconciliation = () => {
             expected_fee: expectedAmount,
             status: status,
             match_confidence: match_confidence,
-            matched_by: match ? `Score Engine (${match_confidence})` : 'No Match'
+            fraud_flag: fraud_flag,
+            matched_by: match ? `AI Score (${match_confidence})` : 'No Match'
           });
 
           totReg++;
         });
 
-        if (status === 'PAID' || status === 'AMOUNT MISMATCH') {
+        if (status === 'PAID') {
           totPay++;
           rev += amount_paid;
           evRev[event_name] = (evRev[event_name] || 0) + amount_paid;
+        } else if (status === 'REVIEW REQUIRED' || status === 'AMOUNT MISMATCH') {
+          pendPay++; // Tracked separately or pending
         } else {
           pendPay++;
         }
@@ -291,9 +329,15 @@ const AdminReconciliation = () => {
     Object.keys(grouped).forEach(eventName => {
       const data = grouped[eventName];
       
-      // Sort: PAID -> NOT PAID -> AMOUNT MISMATCH
+      // Sort: PAID -> REVIEW REQUIRED -> NOT PAID -> DUPLICATE PAYMENT
       data.sort((a, b) => {
-        const order: Record<string, number> = { 'PAID': 1, 'NOT PAID': 2, 'AMOUNT MISMATCH': 3, 'REVIEW REQUIRED': 4 };
+        const order: Record<string, number> = { 
+           'PAID': 1, 
+           'REVIEW REQUIRED': 2, 
+           'AMOUNT MISMATCH': 3, 
+           'NOT PAID': 4, 
+           'DUPLICATE PAYMENT': 5 
+        };
         return (order[a.status] || 99) - (order[b.status] || 99);
       });
 
@@ -308,7 +352,8 @@ const AdminReconciliation = () => {
         'Expected Fee': r.expected_fee,
         'Amount Paid': r.amount_paid,
         'Payment Status': r.status,
-        'Match Type': r.match_confidence > 0 ? `${r.match_confidence}% via ${r.matched_by}` : 'No Match'
+        'Match Confidence': r.match_confidence > 0 ? `${r.match_confidence}%` : '0%',
+        'Fraud Flag': r.fraud_flag
       }));
 
       const worksheet = XLSX.utils.json_to_sheet(sheetData);
@@ -383,7 +428,8 @@ const AdminReconciliation = () => {
   const getStatusIcon = (status: string) => {
     if (status === 'PAID') return <CheckCircle className="h-4 w-4 text-success" />;
     if (status === 'NOT PAID') return <XCircle className="h-4 w-4 text-destructive" />;
-    if (status === 'AMOUNT MISMATCH') return <AlertTriangle className="h-4 w-4 text-amber-500" />;
+    if (status === 'AMOUNT MISMATCH' || status === 'REVIEW REQUIRED') return <AlertTriangle className="h-4 w-4 text-amber-500" />;
+    if (status === 'DUPLICATE PAYMENT') return <AlertTriangle className="h-4 w-4 text-destructive" />;
     return <HelpCircle className="h-4 w-4 text-primary" />;
   };
 
@@ -527,12 +573,13 @@ const AdminReconciliation = () => {
                       <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Event / Track</th>
                       <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Fee / Paid</th>
                       <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Status</th>
-                      <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Match Info</th>
+                      <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">AI Score</th>
+                      <th className="px-4 py-3 text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Fraud Flag</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border font-body">
                     {results.slice(0, 100).map((r, i) => (
-                      <tr key={i} className="hover:bg-secondary/30 transition-colors">
+                      <tr key={i} className={`hover:bg-secondary/30 transition-colors ${r.fraud_flag === 'FRAUD' ? 'bg-destructive/5' : ''}`}>
                         <td className="px-4 py-3 text-xs font-bold font-mono text-primary">{r.id}</td>
                         <td className="px-4 py-3 text-xs font-medium text-foreground">{r.name || '—'}</td>
                         <td className="px-4 py-3 text-xs text-muted-foreground">{r.email || '—'}</td>
@@ -547,17 +594,22 @@ const AdminReconciliation = () => {
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1.5 text-[10px] font-semibold tracking-wider">
                             {getStatusIcon(r.status)}
-                            <span className={r.status === 'PAID' ? 'text-success' : r.status === 'NOT PAID' ? 'text-destructive' : 'text-amber-500'}>
+                            <span className={r.status === 'PAID' ? 'text-success' : r.status === 'NOT PAID' || r.status === 'DUPLICATE PAYMENT' ? 'text-destructive' : 'text-amber-500'}>
                               {r.status}
                             </span>
                           </div>
                         </td>
                         <td className="px-4 py-3 text-[10px] text-muted-foreground">
                           {r.match_confidence > 0 ? (
-                            <span className="bg-primary/10 text-primary px-2 py-0.5 rounded-full font-semibold">
-                              {r.match_confidence}% ({r.matched_by})
+                            <span className={`px-2 py-0.5 rounded-full font-semibold ${r.match_confidence >= 80 ? 'bg-success/10 text-success' : 'bg-amber-500/10 text-amber-500'}`}>
+                              {Math.round(r.match_confidence)}%
                             </span>
                           ) : 'No match'}
+                        </td>
+                        <td className="px-4 py-3 text-[10px] font-semibold">
+                           <span className={r.fraud_flag === 'CLEAN' ? 'text-success' : r.fraud_flag === 'PROBABLE' ? 'text-amber-500' : 'text-destructive'}>
+                             {r.fraud_flag}
+                           </span>
                         </td>
                       </tr>
                     ))}
