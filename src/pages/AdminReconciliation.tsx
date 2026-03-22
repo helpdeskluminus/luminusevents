@@ -63,7 +63,7 @@ const AdminReconciliation = () => {
   }, [user, profile, loading, navigate]);
 
   const normalizeString = (str: any) => String(str || '').trim().toLowerCase();
-  const normalizePhone = (str: any) => String(str || '').replace(/[^\d+]/g, '');
+  const normalize = (v: any) => String(v || '').toLowerCase().replace(/\s+/g, "");
 
   const readExcel = async (file: File): Promise<any[]> => {
     const buffer = await file.arrayBuffer();
@@ -72,9 +72,11 @@ const AdminReconciliation = () => {
     return XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
   };
 
-  const getVal = (row: any, keys: string[], keywords: string[]) => {
-    const key = keys.find(k => keywords.some(kw => k.toLowerCase().includes(kw)));
-    return key ? row[key] : '';
+  const getField = (row: any, keys: string[]) => {
+    for (const key of keys) {
+      if (row[key] !== undefined && row[key] !== "") return row[key];
+    }
+    return null;
   };
 
   const processFiles = async () => {
@@ -85,58 +87,48 @@ const AdminReconciliation = () => {
 
     setIsProcessing(true);
     try {
-      // 1. Parse BillDesk
+      // 1. Parse BillDesk & Filter Valid Payments
       const bdData = await readExcel(billdeskFile);
-      const bdRows: ParsedBillDeskRow[] = bdData.map(row => {
-        // Find columns dynamically
-        const keys = Object.keys(row);
+      const bdRows: ParsedBillDeskRow[] = bdData
+        .filter(row => {
+          const status = normalize(getField(row, ["status", "Status", "Transaction Status"]));
+          // If status column doesn't match success, or isn't present, assume success if no status col?
+          // Prompt strictly states: return status === "success"
+          return status === "success";
+        })
+        .map(row => {
+          const email = normalize(getField(row, ["email", "Email", "Email ID", "Customer Email", "Payer Email"]));
+          const phone = normalize(getField(row, ["phone", "Phone", "Mobile", "Mobile No", "Contact Number"]));
+          const amountStr = getField(row, ["amount", "Amount", "Txn Amount", "Transaction Amount"]);
+          const amount = parseFloat(String(amountStr || '0').replace(/[^\d.-]/g, '')) || 0;
 
-        const email = normalizeString(getVal(row, keys, ['email', 'mail']));
-        const phone = normalizePhone(getVal(row, keys, ['phone', 'mobile', 'contact']));
-        const name = normalizeString(getVal(row, keys, ['name', 'participant']));
-        const amountStr = getVal(row, keys, ['amount', 'fee', 'paid']);
-        const amount = parseFloat(String(amountStr).replace(/[^\d.-]/g, '')) || 0;
-        const event = normalizeString(getVal(row, keys, ['event']));
-
-        return { email, phone, name, amount, event, matched: false };
-      });
+          return { email, phone, name: '', amount, event: '', matched: false };
+        });
 
       // 2. Parse Supabase
       const sbData = await readExcel(supabaseFile);
       const sbRows: ParsedSupabaseRow[] = sbData.map(row => {
         let participants = [];
-        const keys = Object.keys(row);
-        const pKey = keys.find(k => k.toLowerCase().includes('participant'));
-        if (pKey && row[pKey]) {
-          try {
-            participants = typeof row[pKey] === 'string' ? JSON.parse(row[pKey]) : row[pKey];
-            if (!Array.isArray(participants)) participants = [participants];
-          } catch (e) {
-            console.warn('Failed to parse participants JSON', e);
+        try {
+          // Parse JSON directly as specified
+          if (row.participants) {
+             participants = typeof row.participants === 'string' ? JSON.parse(row.participants) : row.participants;
+             if (!Array.isArray(participants)) participants = [participants];
+          } else {
+             // fallback for generic row testing
+             participants = [row];
           }
-        }
-        
-        // If it isn't an array of JSON, maybe it's flattened
-        if (participants.length === 0) {
-          const email = getVal(row, keys, ['email']);
-          const name = getVal(row, keys, ['name']);
-          if (email || name) {
-             participants = [{
-                name: getVal(row, keys, ['name']),
-                email: getVal(row, keys, ['email']),
-                phone: getVal(row, keys, ['phone', 'mobile']),
-                usn: getVal(row, keys, ['usn']),
-                college: getVal(row, keys, ['college', 'institution']),
-                track: getVal(row, keys, ['track']),
-                event: getVal(row, keys, ['event'])
-             }];
-          }
+        } catch (e) {
+          console.warn('Failed to parse participants JSON', e);
         }
 
-        const feeKey = keys.find(k => k.toLowerCase().includes('fee') || k.toLowerCase().includes('amount') || k.toLowerCase().includes('total'));
-        const expected_fee = feeKey ? parseFloat(String(row[feeKey]).replace(/[^\d.-]/g, '')) || 0 : 0;
+        const expected_fee = Number(row.registration_fee || row.fee || row.amount || 0);
         
-        return { participants, expected_fee };
+        return { 
+           participants, 
+           expected_fee,
+           team_id: row.event_name || row.Event || '' 
+        };
       });
 
       // 3. TEAM-BASED MATCHING & Flattening
@@ -147,62 +139,57 @@ const AdminReconciliation = () => {
       let rev = 0;
       const evRev: Record<string, number> = {};
 
-      sbRows.forEach(team => {
-        if (!team.participants || team.participants.length === 0) return;
+      sbRows.forEach(teamRow => {
+        if (!teamRow.participants || teamRow.participants.length === 0) return;
 
-        // Try to find a matching BillDesk row for the team
-        let bestMatch: ParsedBillDeskRow | null = null;
-        let matchConfidence = 0;
-        let matchedBy = '';
+        const team = teamRow.participants;
+        const firstParticipant = team[0];
+        const event_name = teamRow.team_id || '';
+        const expectedAmount = Number(teamRow.expected_fee);
 
-        for (const p of team.participants) {
-          const pEmail = normalizeString(p.email);
-          const pPhone = normalizePhone(p.phone);
-          const pName = normalizeString(p.name);
+        // 5. MATCHING LOGIC (Using ONLY first participant)
+        const match = bdRows.find(b => 
+          !b.matched && (
+            (b.email && b.email === normalize(firstParticipant.email)) ||
+            (b.phone && b.phone === normalize(firstParticipant.phoneNumber || firstParticipant.phone))
+          )
+        );
 
-          const exactEmailMatch = bdRows.find(b => !b.matched && b.email && b.email === pEmail);
-          if (exactEmailMatch) { bestMatch = exactEmailMatch; matchConfidence = 100; matchedBy = 'Email'; break; }
-
-          const exactPhoneMatch = bdRows.find(b => !b.matched && b.phone && b.phone === pPhone);
-          if (exactPhoneMatch) { bestMatch = exactPhoneMatch; matchConfidence = 90; matchedBy = 'Phone'; break; }
-
-          const fuzzyNameMatch = bdRows.find(b => !b.matched && b.name && pName && (b.name.includes(pName) || pName.includes(b.name)));
-          if (fuzzyNameMatch && matchConfidence < 70) { bestMatch = fuzzyNameMatch; matchConfidence = 70; matchedBy = 'Fuzzy Name'; }
+        let paidAmount = 0;
+        if (match) {
+          match.matched = true;
+          paidAmount = match.amount;
         }
 
-        let amount_paid = 0;
-        let status = 'NOT PAID';
-
-        if (bestMatch) {
-          bestMatch.matched = true;
-          amount_paid = bestMatch.amount;
-          if (amount_paid >= team.expected_fee && team.expected_fee > 0) {
-            status = 'PAID';
-          } else if (team.expected_fee === 0) {
-            status = amount_paid > 0 ? 'REVIEW REQUIRED' : 'NOT PAID'; // Free event? Or missing expected_fee?
-          } else {
-            status = 'AMOUNT MISMATCH';
-          }
+        // 8. STATUS LOGIC
+        let status;
+        if (!match) {
+          status = "NOT PAID";
+        } else if (paidAmount !== expectedAmount) {
+          status = "AMOUNT MISMATCH";
+        } else {
+          status = "PAID";
         }
 
-        // Output flattened participants
-        let teamParticipantsTotal = team.participants.length || 1;
-        team.participants.forEach(p => {
-          let eventName = String(p.event || p.event_name || bestMatch?.event || 'Unknown Event');
-          
+        // 10. DEBUG MODE
+        console.log("First Participant:", firstParticipant);
+        console.log("Matched Payment:", match);
+
+        // 9. FINAL OUTPUT (Flatten team but attach same payment)
+        team.forEach(p => {
           flattened.push({
             name: p.name || '',
             email: p.email || '',
-            phone: p.phone || '',
-            usn: p.usn || '',
-            college: p.college || '',
-            event: eventName,
+            phone: p.phoneNumber || p.phone || '',
+            usn: p.studentId || p.usn || '',
+            college: p.collegeName || p.college || '',
+            event: event_name,
             track: p.track || p.track_name || '',
-            amount_paid: amount_paid / teamParticipantsTotal, 
-            expected_fee: team.expected_fee / teamParticipantsTotal,
+            amount_paid: paidAmount, // User requested whole payment amount visible per participant
+            expected_fee: expectedAmount,
             status: status,
-            match_confidence: matchConfidence,
-            matched_by: matchedBy
+            match_confidence: match ? 100 : 0,
+            matched_by: match ? 'First Participant Match' : ''
           });
 
           totReg++;
@@ -210,9 +197,8 @@ const AdminReconciliation = () => {
 
         if (status === 'PAID' || status === 'AMOUNT MISMATCH') {
           totPay++;
-          rev += amount_paid;
-          const evName = bestMatch?.event || 'Unknown Event';
-          evRev[evName] = (evRev[evName] || 0) + amount_paid;
+          rev += paidAmount;
+          evRev[event_name] = (evRev[event_name] || 0) + paidAmount;
         } else {
           pendPay++;
         }
@@ -237,23 +223,66 @@ const AdminReconciliation = () => {
 
   const exportResults = () => {
     if (results.length === 0) return;
-    const worksheet = XLSX.utils.json_to_sheet(results.map(r => ({
-      Name: r.name,
-      Email: r.email,
-      Phone: r.phone,
-      USN: r.usn,
-      College: r.college,
-      Event: r.event,
-      Track: r.track,
-      'Amount Paid': r.amount_paid,
-      'Expected Fee': r.expected_fee,
-      Status: r.status,
-      'Match Confidence %': r.match_confidence,
-      'Matched By': r.matched_by
-    })));
+
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Reconciliation');
-    XLSX.writeFile(workbook, 'Reconciliation_Report.xlsx');
+
+    // 1. SUMMARY SHEET
+    const summaryData = [
+      { Metric: 'Total Participants', Value: stats.totalRegistrations },
+      { Metric: 'Total Paid / Valid', Value: stats.totalPayments },
+      { Metric: 'Total Pending / Not Paid', Value: stats.pendingPayments },
+      { Metric: 'Total Revenue', Value: `₹${stats.revenue}` },
+      ...Object.entries(stats.eventRevenue).map(([ev, rev]) => ({
+        Metric: `Revenue: ${ev}`, Value: `₹${rev}`
+      }))
+    ];
+    const summarySheet = XLSX.utils.json_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+
+    // 2. GROUP BY EVENT
+    const grouped: Record<string, FinalParticipant[]> = {};
+    results.forEach(r => {
+      const evName = r.event || 'Unknown Event';
+      if (!grouped[evName]) grouped[evName] = [];
+      grouped[evName].push(r);
+    });
+
+    // 3. CREATE SHEETS PER EVENT
+    Object.keys(grouped).forEach(eventName => {
+      const data = grouped[eventName];
+      
+      // Sort: PAID -> NOT PAID -> AMOUNT MISMATCH
+      data.sort((a, b) => {
+        const order: Record<string, number> = { 'PAID': 1, 'NOT PAID': 2, 'AMOUNT MISMATCH': 3, 'REVIEW REQUIRED': 4 };
+        return (order[a.status] || 99) - (order[b.status] || 99);
+      });
+
+      const sheetData = data.map(r => ({
+        Name: r.name,
+        Email: r.email,
+        Phone: r.phone,
+        USN: r.usn,
+        College: r.college,
+        Track: r.track || '',
+        'Expected Fee': r.expected_fee,
+        'Amount Paid': r.amount_paid,
+        'Payment Status': r.status,
+        'Match Type': r.match_confidence > 0 ? `${r.match_confidence}% via ${r.matched_by}` : 'No Match'
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(sheetData);
+      
+      // Excel sheet names max 31 characters and no invalid chars
+      const safeSheetName = eventName.replace(/[\\/?*[\]]/g, '').slice(0, 31);
+      
+      try {
+        XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName || 'Event');
+      } catch (e) {
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Event_' + Math.floor(Math.random() * 1000));
+      }
+    });
+
+    XLSX.writeFile(workbook, 'reconciliation_report.xlsx');
   };
 
   const syncToDatabase = async () => {
