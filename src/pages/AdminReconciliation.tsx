@@ -99,10 +99,19 @@ const AdminReconciliation = () => {
         .map(row => {
           const email = normalize(getField(row, ["email", "Email", "Email ID", "Customer Email", "Payer Email"]));
           const phone = normalize(getField(row, ["phone", "Phone", "Mobile", "Mobile No", "Contact Number"]));
-          const amountStr = getField(row, ["amount", "Amount", "Txn Amount", "Transaction Amount"]);
+          const rawName = getField(row, ["name", "Name", "Participant Name", "Customer Name"]);
+          const name = normalizeString(String(rawName || ""));
+          const amountStr = getField(row, ["amount", "Amount", "Paid Amount", "Txn Amount", "Transaction Amount"]);
           const amount = parseFloat(String(amountStr || '0').replace(/[^\d.-]/g, '')) || 0;
+          
+          const rawEvent = getField(row, ["EVENT NAME", "Event", "Event Name"]);
+          const event = String(rawEvent || "")
+            .toLowerCase()
+            .replace(/- rs\..*$/, "")
+            .replace(/- rs.*$/, "")
+            .trim();
 
-          return { email, phone, name: '', amount, event: '', matched: false };
+          return { email, phone, name, amount, event, matched: false };
         });
 
       // 2. Parse Supabase
@@ -144,16 +153,23 @@ const AdminReconciliation = () => {
 
         const team = teamRow.participants;
         const firstParticipant = team[0];
-        const event_name = teamRow.team_id || '';
+        const event_name = normalizeString(teamRow.team_id || '');
         const expectedAmount = Number(teamRow.expected_fee);
 
         // 5. MATCHING LOGIC (Using ONLY first participant)
-        const match = bdRows.find(b => 
-          !b.matched && (
-            (b.email && b.email === normalize(firstParticipant.email)) ||
-            (b.phone && b.phone === normalize(firstParticipant.phoneNumber || firstParticipant.phone))
-          )
-        );
+        const match = bdRows.find(b => {
+          if (b.matched) return false;
+
+          const emailMatch = Boolean(b.email && b.email === normalize(firstParticipant.email));
+          const phoneMatch = Boolean(b.phone && b.phone === normalize(firstParticipant.phoneNumber || firstParticipant.phone));
+          const nameMatch = Boolean(b.name && normalizeString(firstParticipant.name).includes(b.name));
+
+          // 🔥 EVENT MATCH (VERY IMPORTANT)
+          const eventMatch = normalizeString(b.event).includes(event_name) ||
+                             event_name.includes(normalizeString(b.event));
+
+          return (emailMatch || phoneMatch || nameMatch) && eventMatch;
+        });
 
         let paidAmount = 0;
         if (match) {
