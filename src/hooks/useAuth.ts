@@ -16,40 +16,76 @@ export function useAuth() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = useCallback(async (userId: string) => {
+  const fetchProfile = useCallback(async (authUser: User): Promise<UserProfile | null> => {
     const { data, error } = await supabase
       .from('users')
       .select('*')
-      .eq('id', userId)
-      .single();
-    if (!error && data) {
-      setProfile(data as unknown as UserProfile);
+      .eq('id', authUser.id)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (data) {
+      const typed = data as unknown as UserProfile;
+      setProfile(typed);
+      return typed;
     }
+
+    const fullName = (authUser.user_metadata?.full_name as string | undefined)?.trim() || authUser.email?.split('@')[0] || 'New User';
+    await supabase.from('users').insert({
+      id: authUser.id,
+      full_name: fullName,
+      role: 'coordinator',
+      approval_status: 'pending',
+    });
+
+    const { data: created } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', authUser.id)
+      .maybeSingle();
+
+    const typed = (created as unknown as UserProfile) || null;
+    setProfile(typed);
+    return typed;
   }, []);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        if (session?.user) {
-          setUser(session.user);
-          setTimeout(() => fetchProfile(session.user.id), 0);
-        } else {
-          setUser(null);
-          setProfile(null);
-        }
-        setLoading(false);
-      }
-    );
+    let mounted = true;
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setUser(session.user);
-        fetchProfile(session.user.id);
+    const syncAuthState = async (sessionUser: User | null) => {
+      if (!mounted) return;
+      setLoading(true);
+
+      if (!sessionUser) {
+        setUser(null);
+        setProfile(null);
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+
+      setUser(sessionUser);
+      try {
+        await fetchProfile(sessionUser);
+      } catch {
+        setProfile(null);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      void syncAuthState(session?.user ?? null);
     });
 
-    return () => subscription.unsubscribe();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      void syncAuthState(session?.user ?? null);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, [fetchProfile]);
 
   const signOut = async () => {
@@ -63,6 +99,7 @@ export function useAuth() {
     signOut,
     isAdmin: profile?.role === 'admin',
     isApproved: profile?.approval_status === 'approved',
-    refreshProfile: () => user && fetchProfile(user.id),
+    refreshProfile: () => user ? fetchProfile(user) : null,
   };
 }
+
