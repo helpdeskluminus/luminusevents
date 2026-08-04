@@ -1,129 +1,117 @@
-# Event Management Platform
+# Techfest check-in system
 
-A modern, full-stack event management platform built with React, TypeScript, and Lovable Cloud. Create, discover, and manage events with an intuitive interface and powerful features.
+Role-based event check-in system: main gate + per-competition zone gate scanning,
+QR codes emailed automatically from a no-reply address, and three scoped dashboards
+(Admin, Event OC, Disciplinary Committee).
 
-## 🌟 Features
+## Quick start
 
-### Event Management
-- **Create Events**: Easy-to-use form with image upload, date/time selection, and location integration
-- **Edit Events**: Update your events anytime with full editing capabilities
-- **Delete Events**: Remove events you've created with confirmation dialog
-- **Event Discovery**: Browse all upcoming events in a beautiful card layout
-- **Event Details**: Rich event pages with countdown timers, location maps, and registration
-
-### User Authentication
-- **Secure Sign Up/Login**: Email and password authentication with automatic email confirmation
-- **User Profiles**: Automatic profile creation with display names
-- **Protected Routes**: Secure admin and event management pages
-- **Session Management**: Persistent authentication across sessions
-
-### Location Integration
-- **Google Maps Autocomplete**: Search and select locations with autocomplete suggestions
-- **Interactive Maps**: Embedded Google Maps on event detail pages
-- **Get Directions**: Direct links to Google Maps for navigation
-
-### Image Management
-- **Image Upload**: Drag-and-drop or click to upload event images
-- **File Validation**: Automatic validation for file type (JPG, PNG, GIF, WebP) and size (max 5MB)
-- **Secure Storage**: Images stored securely in cloud storage
-
-### Admin Features
-- **Admin Dashboard**: Manage all events from a centralized dashboard
-- **Event Moderation**: View, edit, or delete any event
-- **User Management**: Access to user profiles and event data
-
-### SEO Optimized
-- **Meta Tags**: Proper title, description, and keywords for each page
-- **Semantic HTML**: Structured markup for better search engine visibility
-- **Open Graph Tags**: Social media preview optimization
-- **Responsive Design**: Mobile-first design that works on all devices
-
-## Project info
-
-**URL**: https://lovable.dev/projects/f1ba0c74-af75-4389-a8ae-60baf80911b5
-
-## How can I edit this code?
-
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/f1ba0c74-af75-4389-a8ae-60baf80911b5) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```bash
+npm install
+cp .env.example .env
+# edit .env — set real secrets (see "Generating secrets" below) and SMTP details
+node src/server.js
 ```
 
-**Edit a file directly in GitHub**
+Visit `http://localhost:4000` — log in with the bootstrap admin credentials from `.env`
+(`BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`), then **immediately change the
+password and remove the bootstrap password from `.env`.**
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+The scanner UI is at `/scanner.html` (needs camera access — works on phones/tablets over HTTPS).
 
-**Use GitHub Codespaces**
+## Generating secrets
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```bash
+openssl rand -hex 64   # run twice — once for JWT_SECRET, once for QR_TOKEN_SECRET
+```
+Never reuse the same secret for both. If one leaks, the other credential class stays safe.
 
-## What technologies are used for this project?
+## How the roles work
 
-This project is built with:
+- **Admin** — creates events, creates Event OC / Disciplinary Committee logins, bulk-uploads
+  participants via CSV, triggers the QR emails, sees a fest-wide dashboard.
+- **Event OC** — logs in and is *hard-scoped* server-side to their own `event_id`. They cannot
+  query another event's data even by editing request parameters — the server ignores any
+  client-supplied `event_id` for this role and substitutes their assigned one.
+- **Disciplinary Committee** — cross-event read access: live occupancy across all zones, a feed
+  of denials/duplicates/revocations, per-participant history, and can file incident reports.
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## How check-in works
 
-## Configuration
+1. Participant is uploaded (CSV) or registered, gets a unique signed QR token, mailed to them.
+2. **Main gate scan** (admin/gate-staff): validates the QR signature, checks it hasn't been
+   revoked, checks for duplicate entry, logs it.
+3. **Zone gate scan** (Event OC, scoped to their event): requires the participant already passed
+   the main gate, requires they're registered for *that specific* competition, checks venue
+   capacity, checks for duplicates, logs it.
 
-### Google Maps Places Autocomplete
+Both scans write to one `scan_logs` table — live counts are just filtered queries over it, so
+Admin/OC/DC dashboards never go out of sync with each other.
 
-This project uses Google Maps Places API for location autocomplete. To enable this feature:
+## Forgot password
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select an existing one
-3. Enable the **Places API (New)** in the API Library
-4. Go to **Credentials** → **Create Credentials** → **API Key**
-5. Copy the API key
-6. Add it to your `.env` file:
-   ```
-   VITE_GOOGLE_MAPS_API_KEY="your-api-key-here"
-   ```
+`POST /api/auth/forgot-password` with `{ email }` — always returns the same generic message
+regardless of whether the account exists, so it can't be used to check who has an account.
+If the account exists, a one-time reset link is emailed (`/reset-password.html?token=...`).
 
-**Optional but recommended:** Restrict your API key to only work with the Places API and your domain for security.
+- The raw token only ever exists in the email. The database stores its SHA-256 hash — the
+  same principle as password hashing — so a database leak alone can't be replayed as a reset.
+- Tokens expire after 30 minutes and are single-use; using one invalidates any other
+  outstanding reset requests for that account.
+- `POST /api/auth/reset-password` with `{ token, new_password }` gives the same generic
+  "invalid or expired" error whether the token is wrong, expired, or already used — no
+  information leakage either way.
+- Both endpoints are rate-limited (5 requests / 15 min per IP) to blunt mail-bombing and
+  token brute-forcing.
 
-## How can I deploy this project?
+## CSV upload format
 
-Simply open [Lovable](https://lovable.dev/projects/f1ba0c74-af75-4389-a8ae-60baf80911b5) and click on Share -> Publish.
+```csv
+name,email,phone,ticket_type,events
+Amit Kumar,amit@example.com,9999999999,general,Robo Wars;Hackathon
+```
+`events` is semicolon-separated — a participant can be registered for multiple competitions.
+Re-uploading an existing email is safe (it's skipped, not duplicated).
 
-## Can I connect a custom domain to my Lovable project?
+## Security — what's implemented, and what you must still do
 
-Yes, you can!
+**Implemented:**
+- Passwords hashed with bcrypt (cost 12), never stored or logged in plaintext.
+- Session tokens are short-lived signed JWTs; QR tokens use a **separate** signing secret
+  from login tokens, and are individually revocable via a `jti` stored per participant
+  (revoke a lost/stolen badge without touching anyone else).
+- Every write query uses parameterized statements (`better-sqlite3` prepared statements) —
+  no string-concatenated SQL anywhere, so this is not vulnerable to SQL injection.
+- Role checks happen server-side on every request; the Event OC's event scope is derived
+  from their own account record, never trusted from client input.
+- Login rate limiting + automatic account lockout after 5 failed attempts (15 min).
+- `helmet` security headers, restrictive CORS (set `CORS_ORIGIN` to your real frontend origin,
+  never `*`, in production).
+- Input validation (`zod`) on every write endpoint; malformed input is rejected, not coerced.
+- Audit log of admin actions, logins, and scan events (`audit_log`, `scan_logs` tables).
+- Generic, non-enumerating error messages on login (doesn't reveal whether an email exists).
+- Error handler never leaks stack traces to clients.
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+**You are responsible for, before going live:**
+- **HTTPS.** This app must run behind TLS (a reverse proxy like Caddy/Nginx, or a platform
+  that terminates TLS for you) — JWTs and passwords must never travel over plain HTTP.
+  Camera access for the scanner page also requires HTTPS on mobile browsers.
+- **A real transactional email provider** (SES, SendGrid, Postmark, Mailgun) with your
+  domain's SPF/DKIM/DMARC configured — otherwise your "no-reply" mail will land in spam,
+  and generic SMTP creds are easy to leak.
+- **Secrets management** — don't commit `.env`; use your host's secret manager in production.
+- **Backups** of the SQLite file (`data/techfest.db`), or migrate to Postgres for a
+  multi-day fest with concurrent write load from many gate devices — SQLite handles
+  moderate concurrent writes fine but has a ceiling.
+- **A claim I won't make:** no system connected to the internet is "unhackable." This
+  implementation avoids the common, high-impact mistakes (plaintext passwords, forgeable
+  tokens, SQL injection, unscoped data access) — it does not guarantee immunity from every
+  possible attack. Get someone to review it before a real event if it's mission-critical.
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+## Extending this
+
+- Add a `gate_staff` role if you don't want full admins physically operating the main gate
+  device — currently main-gate scanning requires the `admin` role for simplicity.
+- Add WebSocket/SSE push instead of polling if you want dashboards to update without refresh.
+- Add exit scans (`direction: 'out'`) if you need real-time *occupancy* rather than
+  cumulative check-in counts.

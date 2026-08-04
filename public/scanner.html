@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Gate scanner</title>
+<link rel="stylesheet" href="style.css" />
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+<div class="container" style="max-width:480px;">
+  <h2>Gate scanner</h2>
+  <div class="card">
+    <label>Gate type</label>
+    <select id="gate-type">
+      <option value="main-gate">Main gate (fest entry)</option>
+      <option value="zone-gate">Zone gate (competition entry)</option>
+    </select>
+    <div id="reader" style="margin-top:16px;"></div>
+    <p class="tag">Point the camera at a participant's QR code.</p>
+  </div>
+  <div id="scan-result" class="card hidden"></div>
+</div>
+<script>
+const API = '/api';
+function getToken() { return sessionStorage.getItem('token'); }
+if (!getToken()) { window.location.href = 'index.html'; }
+
+const resultBox = document.getElementById('scan-result');
+let busy = false;
+
+async function handleScan(qrText) {
+  if (busy) return;
+  busy = true;
+  const gateType = document.getElementById('gate-type').value;
+  try {
+    const res = await fetch(`${API}/scan/${gateType}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
+      body: JSON.stringify({ qr_token: qrText, device_id: navigator.userAgent.slice(0, 40) }),
+    });
+    const data = await res.json();
+    resultBox.classList.remove('hidden', 'success', 'denied', 'duplicate');
+    if (data.result === 'success') {
+      resultBox.classList.add('success');
+      resultBox.textContent = `✓ Welcome, ${data.name}`;
+    } else if (data.result === 'duplicate') {
+      resultBox.classList.add('duplicate');
+      resultBox.textContent = `Already checked in — ${data.name || ''}`;
+    } else {
+      resultBox.classList.add('denied');
+      resultBox.textContent = `✗ Denied: ${data.reason || 'unknown error'}`;
+    }
+  } catch (err) {
+    resultBox.classList.remove('hidden'); resultBox.classList.add('denied');
+    resultBox.textContent = 'Network error — scan not recorded, try again.';
+  }
+  setTimeout(() => { busy = false; }, 1500); // brief cooldown so the same scan isn't double-fired
+}
+
+const scanner = new Html5Qrcode('reader');
+scanner.start(
+  { facingMode: 'environment' },
+  { fps: 10, qrbox: 250 },
+  (decodedText) => handleScan(decodedText),
+  () => {}
+).catch(err => {
+  document.getElementById('reader').innerHTML = '<p class="tag">Camera unavailable: ' + err + '</p>';
+});
+</script>
+</body>
+</html>

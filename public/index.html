@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Techfest check-in</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="container">
+
+  <!-- LOGIN -->
+  <div id="login-view" class="card" style="max-width:380px;margin:80px auto;">
+    <h2>Sign in</h2>
+    <label>Email</label>
+    <input id="login-email" type="email" autocomplete="username" />
+    <label>Password</label>
+    <input id="login-password" type="password" autocomplete="current-password" />
+    <div style="margin-top:16px;"><button id="login-btn" style="width:100%;">Sign in</button></div>
+    <p id="login-error" style="color:var(--red);font-size:13px;"></p>
+    <p style="margin-top:8px;"><a href="#" id="forgot-link" class="tag">Forgot password?</a></p>
+  </div>
+
+  <div id="forgot-view" class="hidden card" style="max-width:380px;margin:80px auto;">
+    <h2>Reset password</h2>
+    <p class="tag">Enter your account email — if it exists, we'll send a reset link.</p>
+    <label>Email</label>
+    <input id="forgot-email" type="email" autocomplete="username" />
+    <div style="margin-top:16px;"><button id="forgot-submit-btn" style="width:100%;">Send reset link</button></div>
+    <p id="forgot-msg" class="tag"></p>
+    <p style="margin-top:8px;"><a href="#" id="back-to-login" class="tag">Back to sign in</a></p>
+  </div>
+
+  <!-- APP -->
+  <div id="app-view" class="hidden">
+    <div class="topbar">
+      <div>
+        <h2 id="who-name" style="margin:0"></h2>
+        <span class="tag" id="who-role"></span>
+      </div>
+      <button class="secondary" id="logout-btn">Log out</button>
+    </div>
+
+    <!-- ADMIN -->
+    <div id="admin-view" class="hidden">
+      <div class="card">
+        <h3>Fest-wide overview</h3>
+        <div class="stat-grid" id="admin-stats"></div>
+      </div>
+
+      <div class="card">
+        <h3>Create event</h3>
+        <div class="row">
+          <div><label>Name</label><input id="ev-name" /></div>
+          <div><label>Venue</label><input id="ev-venue" /></div>
+          <div><label>Capacity</label><input id="ev-capacity" type="number" /></div>
+        </div>
+        <div style="margin-top:12px;"><button id="ev-create-btn">Create event</button></div>
+        <p id="ev-msg" class="tag"></p>
+      </div>
+
+      <div class="card">
+        <h3>Create OC / Disciplinary login</h3>
+        <div class="row">
+          <div><label>Name</label><input id="acc-name" /></div>
+          <div><label>Email</label><input id="acc-email" type="email" /></div>
+          <div><label>Temp password</label><input id="acc-password" /></div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Role</label>
+            <select id="acc-role">
+              <option value="event_oc">Event OC</option>
+              <option value="disciplinary">Disciplinary committee</option>
+            </select>
+          </div>
+          <div id="acc-event-wrap"><label>Event (for OC)</label><select id="acc-event"></select></div>
+        </div>
+        <div style="margin-top:12px;"><button id="acc-create-btn">Create account</button></div>
+        <p id="acc-msg" class="tag"></p>
+      </div>
+
+      <div class="card">
+        <h3>Bulk upload participants (CSV)</h3>
+        <p class="tag">Columns: name, email, phone, ticket_type, events (semicolon-separated event names)</p>
+        <input type="file" id="csv-file" accept=".csv" />
+        <div style="margin-top:12px;">
+          <button id="csv-upload-btn">Upload</button>
+          <button class="secondary" id="mail-all-btn">Send QR mail to all pending</button>
+        </div>
+        <p id="csv-msg" class="tag"></p>
+      </div>
+
+      <div class="card">
+        <h3>Per-event live check-ins</h3>
+        <table><thead><tr><th>Event</th><th>Registered</th><th>Checked in</th><th>Capacity</th></tr></thead>
+        <tbody id="admin-events-table"></tbody></table>
+      </div>
+    </div>
+
+    <!-- EVENT OC -->
+    <div id="oc-view" class="hidden">
+      <div class="card">
+        <h3 id="oc-event-name"></h3>
+        <div class="stat-grid">
+          <div><div class="stat" id="oc-registered">-</div><div class="stat-label">Registered</div></div>
+          <div><div class="stat" id="oc-checkedin">-</div><div class="stat-label">Checked in</div></div>
+          <div><div class="stat" id="oc-capacity">-</div><div class="stat-label">Capacity</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Live check-in feed</h3>
+        <table><thead><tr><th>Name</th><th>Email</th><th>Time</th></tr></thead>
+        <tbody id="oc-checkin-table"></tbody></table>
+      </div>
+      <a href="scanner.html" class="tag">Open zone gate scanner &rarr;</a>
+    </div>
+
+    <!-- DISCIPLINARY -->
+    <div id="dc-view" class="hidden">
+      <div class="card">
+        <h3>Cross-event live occupancy</h3>
+        <table><thead><tr><th>Event</th><th>Checked in</th><th>Capacity</th></tr></thead>
+        <tbody id="dc-events-table"></tbody></table>
+      </div>
+      <div class="card">
+        <h3>Recent denials / duplicates / revocations</h3>
+        <table><thead><tr><th>Name</th><th>Event</th><th>Status</th><th>Reason</th><th>Time</th></tr></thead>
+        <tbody id="dc-denials-table"></tbody></table>
+      </div>
+      <div class="card">
+        <h3>File an incident</h3>
+        <div class="row">
+          <div><label>Participant ID (optional)</label><input id="inc-participant" type="number" /></div>
+          <div><label>Event ID (optional)</label><input id="inc-event" type="number" /></div>
+          <div><label>Severity</label>
+            <select id="inc-severity"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
+          </div>
+        </div>
+        <label>Description</label>
+        <textarea id="inc-desc" rows="3" style="width:100%"></textarea>
+        <div style="margin-top:12px;"><button id="inc-submit-btn">Submit incident</button></div>
+        <p id="inc-msg" class="tag"></p>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
