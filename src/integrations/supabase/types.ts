@@ -60,7 +60,6 @@ export type Database = {
           id: string
           location: string
           name: string
-          registration_fee: number | null
         }
         Insert: {
           created_at?: string | null
@@ -68,7 +67,6 @@ export type Database = {
           id?: string
           location: string
           name: string
-          registration_fee?: number | null
         }
         Update: {
           created_at?: string | null
@@ -76,7 +74,6 @@ export type Database = {
           id?: string
           location?: string
           name?: string
-          registration_fee?: number | null
         }
         Relationships: []
       }
@@ -91,11 +88,6 @@ export type Database = {
           name: string
           phone: string | null
           qr_token: string
-          usn: string | null
-          college: string | null
-          track_id: string | null
-          amount_paid: number | null
-          payment_status: string | null
         }
         Insert: {
           checked_in?: boolean | null
@@ -107,11 +99,6 @@ export type Database = {
           name: string
           phone?: string | null
           qr_token: string
-          usn?: string | null
-          college?: string | null
-          track_id?: string | null
-          amount_paid?: number | null
-          payment_status?: string | null
         }
         Update: {
           checked_in?: boolean | null
@@ -123,51 +110,10 @@ export type Database = {
           name?: string
           phone?: string | null
           qr_token?: string
-          usn?: string | null
-          college?: string | null
-          track_id?: string | null
-          amount_paid?: number | null
-          payment_status?: string | null
         }
         Relationships: [
           {
             foreignKeyName: "participants_event_id_fkey"
-            columns: ["event_id"]
-            isOneToOne: false
-            referencedRelation: "events"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "participants_track_id_fkey"
-            columns: ["track_id"]
-            isOneToOne: false
-            referencedRelation: "tracks"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      tracks: {
-        Row: {
-          id: string
-          event_id: string
-          name: string
-          created_at: string | null
-        }
-        Insert: {
-          id?: string
-          event_id: string
-          name: string
-          created_at?: string | null
-        }
-        Update: {
-          id?: string
-          event_id?: string
-          name?: string
-          created_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "tracks_event_id_fkey"
             columns: ["event_id"]
             isOneToOne: false
             referencedRelation: "events"
