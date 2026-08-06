@@ -15,13 +15,13 @@ import { Trash2 } from 'lucide-react';
 
 interface EventRow { id: string; name: string; description: string | null; banner_url: string | null; start_date: string | null; end_date: string | null }
 interface CompetitionRow { id: string; event_id: string; name: string; venue: string | null; start_time: string | null; capacity: number | null }
-interface StaffRow { user_id: string; role: string; competition_id: string | null; profiles: { full_name: string; email: string | null } | null }
+interface StaffRow { user_id: string; role: string; competition_id: string | null; profiles: { full_name: string; email: string | null; position: string | null } | null }
 interface PendingRow { id: string; full_name: string; email: string | null; created_at: string }
 interface Stats { gate: number; registrations: number; perCompetition: Record<string, number> }
 
 const emptyEvent = { name: '', description: '', banner_url: '', start_date: '', end_date: '' };
 const emptyComp = { event_id: '', name: '', description: '', poster_url: '', venue: '', start_time: '', end_time: '', capacity: '', rules_url: '' };
-const emptyStaff = { full_name: '', email: '', password: '', role: 'disciplinary', competition_id: '' };
+const emptyStaff = { full_name: '', email: '', password: '', role: 'disciplinary', competition_id: '', position: '' };
 
 const AdminPanel = () => {
   const tick = useLiveTick(['checkins', 'registrations']);
@@ -31,6 +31,7 @@ const AdminPanel = () => {
   const [pending, setPending] = useState<PendingRow[]>([]);
   const [pendingRole, setPendingRole] = useState<Record<string, string>>({});
   const [pendingComp, setPendingComp] = useState<Record<string, string>>({});
+  const [pendingPos, setPendingPos] = useState<Record<string, string>>({});
   const [stats, setStats] = useState<Stats>({ gate: 0, registrations: 0, perCompetition: {} });
   const [eventForm, setEventForm] = useState(emptyEvent);
   const [compForm, setCompForm] = useState(emptyComp);
@@ -46,7 +47,7 @@ const AdminPanel = () => {
     const [{ data: ev }, { data: comps }, { data: roles }] = await Promise.all([
       supabase.from('events').select('*').order('created_at', { ascending: false }),
       supabase.from('competitions').select('id, event_id, name, venue, start_time, capacity').order('start_time'),
-      supabase.from('user_roles').select('user_id, role, competition_id, profiles(full_name, email)'),
+      supabase.from('user_roles').select('user_id, role, competition_id, profiles(full_name, email, position)'),
     ]);
     setEvents((ev as EventRow[]) ?? []);
     setCompetitions((comps as CompetitionRow[]) ?? []);
@@ -133,6 +134,7 @@ const AdminPanel = () => {
         password: staffForm.password,
         role: staffForm.role,
         competition_id: staffForm.role === 'event_oc' ? staffForm.competition_id : null,
+        position: staffForm.position.trim() || null,
       },
     });
     setSaving(false);
@@ -156,7 +158,7 @@ const AdminPanel = () => {
     const competitionId = pendingComp[userId] ?? '';
     if (role === 'event_oc' && !competitionId) return toast.error('Pick a competition for this Event OC account');
     const { data, error } = await supabase.functions.invoke('create-staff-user', {
-      body: { action: 'approve', user_id: userId, role, competition_id: role === 'event_oc' ? competitionId : null },
+      body: { action: 'approve', user_id: userId, role, competition_id: role === 'event_oc' ? competitionId : null, position: pendingPos[userId] ?? '' },
     });
     const payload = data as { error?: string } | null;
     if (error || payload?.error) return toast.error(payload?.error ?? 'Could not approve account');
@@ -308,6 +310,12 @@ const AdminPanel = () => {
                         <p className="font-medium truncate">{p.full_name}</p>
                         <p className="text-xs text-muted-foreground truncate">{p.email}</p>
                       </div>
+                      <Input
+                        placeholder="Position (optional)"
+                        className="w-full sm:w-40"
+                        value={pendingPos[p.id] ?? ''}
+                        onChange={(e) => setPendingPos({ ...pendingPos, [p.id]: e.target.value })}
+                      />
                       <Select value={role} onValueChange={(v) => setPendingRole({ ...pendingRole, [p.id]: v })}>
                         <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
                         <SelectContent>
@@ -340,6 +348,10 @@ const AdminPanel = () => {
             <div className="space-y-2"><Label>Email</Label><Input type="email" required value={staffForm.email} onChange={(e) => setStaffForm({ ...staffForm, email: e.target.value })} /></div>
             <div className="space-y-2"><Label>Temporary password (min 10 chars)</Label><Input type="text" required minLength={10} value={staffForm.password} onChange={(e) => setStaffForm({ ...staffForm, password: e.target.value })} /></div>
             <div className="space-y-2">
+              <Label>Position of Responsibility <span className="text-muted-foreground font-normal">(optional, display only)</span></Label>
+              <Input placeholder="e.g. Head of Logistics" value={staffForm.position} onChange={(e) => setStaffForm({ ...staffForm, position: e.target.value })} />
+            </div>
+            <div className="space-y-2">
               <Label>Role</Label>
               <Select value={staffForm.role} onValueChange={(v) => setStaffForm({ ...staffForm, role: v })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -367,6 +379,7 @@ const AdminPanel = () => {
               <div key={s.user_id} className="rounded-2xl border border-border bg-card p-5 flex items-center justify-between gap-3">
                 <div>
                   <p className="font-medium">{s.profiles?.full_name ?? 'Unnamed'}</p>
+                  {s.profiles?.position && <p className="text-xs text-muted-foreground">{s.profiles.position}</p>}
                   <p className="text-xs text-muted-foreground">{s.profiles?.email}</p>
                   <p className="text-[10px] font-semibold tracking-wider uppercase text-primary mt-1">
                     {s.role.replace('_', ' ')}
