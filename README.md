@@ -4,12 +4,12 @@ Role-based event check-in system: main-gate + per-competition venue scanning,
 QR ticket emails sent from a no-reply address, and scoped dashboards for
 Admin, Event OC, and the Disciplinary Committee.
 
-**Stack:** Vite + React + TypeScript + shadcn/ui, backed entirely by
-[Lovable Cloud](https://docs.lovable.dev/features/cloud) (a managed Supabase
-project — Postgres + Auth + Storage + Edge Functions). There is no separate
-Node server to run — the app is a static SPA that talks directly to Supabase,
-with all privileged logic (creating staff accounts, verifying scans, sending
-email) living in Edge Functions that use the service-role key server-side.
+**Stack:** Vite + React + TypeScript + shadcn/ui, backed by Supabase
+(Postgres + Auth + Storage + Edge Functions). There is no separate Node
+server to run — the app is a static SPA hosted on Vercel that talks
+directly to Supabase, with all privileged logic (creating staff accounts,
+verifying scans, sending email) living in Edge Functions that use the
+service-role key server-side.
 
 > If you're browsing the repo history: earlier commits included a parallel
 > Express + SQLite + JWT backend (`src/server.js`, `src/routes/`,
@@ -29,15 +29,21 @@ Visit the printed local URL. Sign in at `/auth` (staff only — see below).
 
 ## Bootstrapping the first admin
 
-There's no public sign-up. Create the first admin manually:
+Staff sign-up is public (`/auth` → Create account), but a brand new account has
+no role and can't reach any dashboard until an admin approves it — and the
+very first admin has to be granted manually, since no admin exists yet to
+approve them:
 
-1. In the Supabase Dashboard, go to Authentication → Users → Add user, and
-   create an account for yourself.
-2. Run `BOOTSTRAP_FIRST_ADMIN.sql` (in this repo) in the SQL Editor, with
-   your email swapped in.
-3. Sign in at `/auth`. From the Admin dashboard you can now create every
-   other staff account (Event OC / Disciplinary) — no one else ever needs
-   direct SQL access.
+1. Go to `/auth` on your deployed site and create an account for yourself
+   (Create account tab). This creates the auth user + a profile row with no
+   role — you won't be able to access anything yet.
+2. Run `BOOTSTRAP_FIRST_ADMIN.sql` (in this repo) in the Supabase SQL Editor,
+   with your email swapped in. This grants your account the `admin` role
+   directly.
+3. Sign in at `/auth`. From the Admin dashboard's Staff tab, you'll now see a
+   "Pending approval" queue for every future sign-up — pick their role (and
+   competition, for Event OC) and approve, or reject to delete the account.
+   No one else ever needs direct SQL access again.
 
 ## How the roles work
 

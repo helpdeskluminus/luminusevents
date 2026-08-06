@@ -19,9 +19,14 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const token: string = typeof body?.token === "string" ? body.token.trim() : "";
+    const ticketCode: string = typeof body?.ticket_code === "string" ? body.ticket_code.trim().toUpperCase() : "";
     const mode: string = body?.mode === "venue" ? "venue" : body?.mode === "gate" ? "gate" : "";
     const deviceInfo: string | null = typeof body?.device_info === "string" ? body.device_info.slice(0, 200) : null;
-    if (!token || token.length > 512 || !mode) return json({ error: "Invalid request" }, 400);
+
+    if (!mode) return json({ error: "Invalid request" }, 400);
+    if (!token && !ticketCode) return json({ error: "Invalid request" }, 400);
+    if (token && token.length > 512) return json({ error: "Invalid request" }, 400);
+    if (ticketCode && !/^TF-[A-Z0-9]{4,16}$/.test(ticketCode)) return json({ error: "Invalid ticket code" }, 400);
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
@@ -35,18 +40,34 @@ Deno.serve(async (req) => {
     if (mode === "gate" && !(isAdmin || isDisciplinary)) return json({ error: "Not authorised for the main gate" }, 403);
     if (mode === "venue" && !(isAdmin || ocRole)) return json({ error: "Not authorised for venue scanning" }, 403);
 
-    // ---- Signature check ----
-    if (!(await verifyTicketToken(token))) {
-      return json({ result: "denied", reason: "Invalid or tampered QR code" });
+    // ---- Ticket lookup ----
+    // Camera scans send the signed QR token (verified below); the manual fallback
+    // uses the short human-readable ticket_code printed on the ticket/email instead,
+    // since the raw signed token is never shown to the attendee — only encoded in
+    // the QR image itself, so it was never something a person could type in.
+    let reg;
+    if (token) {
+      if (!(await verifyTicketToken(token))) {
+        return json({ result: "denied", reason: "Invalid or tampered QR code" });
+      }
+      const { data } = await admin
+        .from("registrations")
+        .select(`id, ticket_code, status, competition_id,
+          participants ( name, email, organization ),
+          competitions ( id, name, venue )`)
+        .eq("qr_secret_token", token)
+        .maybeSingle();
+      reg = data;
+    } else {
+      const { data } = await admin
+        .from("registrations")
+        .select(`id, ticket_code, status, competition_id,
+          participants ( name, email, organization ),
+          competitions ( id, name, venue )`)
+        .eq("ticket_code", ticketCode)
+        .maybeSingle();
+      reg = data;
     }
-
-    const { data: reg } = await admin
-      .from("registrations")
-      .select(`id, ticket_code, status, competition_id,
-        participants ( name, email, organization ),
-        competitions ( id, name, venue )`)
-      .eq("qr_secret_token", token)
-      .maybeSingle();
 
     if (!reg) return json({ result: "denied", reason: "Ticket not recognised" });
     if (reg.status !== "confirmed") return json({ result: "denied", reason: `Ticket is ${reg.status}` });

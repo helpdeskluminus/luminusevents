@@ -16,6 +16,7 @@ import { Trash2 } from 'lucide-react';
 interface EventRow { id: string; name: string; description: string | null; banner_url: string | null; start_date: string | null; end_date: string | null }
 interface CompetitionRow { id: string; event_id: string; name: string; venue: string | null; start_time: string | null; capacity: number | null }
 interface StaffRow { user_id: string; role: string; competition_id: string | null; profiles: { full_name: string; email: string | null } | null }
+interface PendingRow { id: string; full_name: string; email: string | null; created_at: string }
 interface Stats { gate: number; registrations: number; perCompetition: Record<string, number> }
 
 const emptyEvent = { name: '', description: '', banner_url: '', start_date: '', end_date: '' };
@@ -27,11 +28,19 @@ const AdminPanel = () => {
   const [events, setEvents] = useState<EventRow[]>([]);
   const [competitions, setCompetitions] = useState<CompetitionRow[]>([]);
   const [staff, setStaff] = useState<StaffRow[]>([]);
+  const [pending, setPending] = useState<PendingRow[]>([]);
+  const [pendingRole, setPendingRole] = useState<Record<string, string>>({});
+  const [pendingComp, setPendingComp] = useState<Record<string, string>>({});
   const [stats, setStats] = useState<Stats>({ gate: 0, registrations: 0, perCompetition: {} });
   const [eventForm, setEventForm] = useState(emptyEvent);
   const [compForm, setCompForm] = useState(emptyComp);
   const [staffForm, setStaffForm] = useState(emptyStaff);
   const [saving, setSaving] = useState(false);
+
+  const loadPending = useCallback(async () => {
+    const { data, error } = await supabase.functions.invoke('create-staff-user', { body: { action: 'pending' } });
+    if (!error) setPending(((data as { pending?: PendingRow[] } | null)?.pending) ?? []);
+  }, []);
 
   const loadStructure = useCallback(async () => {
     const [{ data: ev }, { data: comps }, { data: roles }] = await Promise.all([
@@ -42,7 +51,8 @@ const AdminPanel = () => {
     setEvents((ev as EventRow[]) ?? []);
     setCompetitions((comps as CompetitionRow[]) ?? []);
     setStaff((roles as unknown as StaffRow[]) ?? []);
-  }, []);
+    void loadPending();
+  }, [loadPending]);
 
   const loadStats = useCallback(async () => {
     const [{ count: gate }, { count: regs }, { data: venueRows }] = await Promise.all([
@@ -141,6 +151,27 @@ const AdminPanel = () => {
     void loadStructure();
   };
 
+  const approvePending = async (userId: string) => {
+    const role = pendingRole[userId] ?? 'disciplinary';
+    const competitionId = pendingComp[userId] ?? '';
+    if (role === 'event_oc' && !competitionId) return toast.error('Pick a competition for this Event OC account');
+    const { data, error } = await supabase.functions.invoke('create-staff-user', {
+      body: { action: 'approve', user_id: userId, role, competition_id: role === 'event_oc' ? competitionId : null },
+    });
+    const payload = data as { error?: string } | null;
+    if (error || payload?.error) return toast.error(payload?.error ?? 'Could not approve account');
+    toast.success('Account approved');
+    void loadStructure();
+  };
+
+  const rejectPending = async (userId: string) => {
+    const { data, error } = await supabase.functions.invoke('create-staff-user', { body: { action: 'reject', user_id: userId } });
+    const payload = data as { error?: string } | null;
+    if (error || payload?.error) return toast.error(payload?.error ?? 'Could not reject account');
+    toast.success('Account rejected');
+    void loadStructure();
+  };
+
   return (
     <main className="max-w-6xl mx-auto px-6 py-10">
       <Helmet>
@@ -171,7 +202,9 @@ const AdminPanel = () => {
           <TabsTrigger value="live">Live</TabsTrigger>
           <TabsTrigger value="events">Events</TabsTrigger>
           <TabsTrigger value="competitions">Competitions</TabsTrigger>
-          <TabsTrigger value="staff">Staff</TabsTrigger>
+          <TabsTrigger value="staff">
+            Staff{pending.length > 0 && <span className="ml-1.5 rounded-full bg-primary text-primary-foreground text-[10px] px-1.5 py-0.5">{pending.length}</span>}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="live" className="mt-6">
@@ -260,7 +293,47 @@ const AdminPanel = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="staff" className="mt-6 grid lg:grid-cols-2 gap-6">
+        <TabsContent value="staff" className="mt-6 space-y-8">
+          {pending.length > 0 && (
+            <div className="rounded-2xl border border-primary/40 bg-primary/5 p-5">
+              <p className="text-[10px] font-semibold tracking-[0.2em] text-primary mb-4">
+                PENDING APPROVAL · {pending.length}
+              </p>
+              <div className="space-y-3">
+                {pending.map((p) => {
+                  const role = pendingRole[p.id] ?? 'disciplinary';
+                  return (
+                    <div key={p.id} className="rounded-xl border border-border bg-card p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">{p.full_name}</p>
+                        <p className="text-xs text-muted-foreground truncate">{p.email}</p>
+                      </div>
+                      <Select value={role} onValueChange={(v) => setPendingRole({ ...pendingRole, [p.id]: v })}>
+                        <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="disciplinary">Disciplinary (main gate)</SelectItem>
+                          <SelectItem value="event_oc">Event OC (one competition)</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {role === 'event_oc' && (
+                        <Select value={pendingComp[p.id] ?? ''} onValueChange={(v) => setPendingComp({ ...pendingComp, [p.id]: v })}>
+                          <SelectTrigger className="w-full sm:w-44"><SelectValue placeholder="Competition" /></SelectTrigger>
+                          <SelectContent>{competitions.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                        </Select>
+                      )}
+                      <div className="flex gap-2 shrink-0">
+                        <Button size="sm" onClick={() => approvePending(p.id)} className="rounded-full text-xs font-semibold tracking-wider">APPROVE</Button>
+                        <Button size="sm" variant="outline" onClick={() => rejectPending(p.id)} className="rounded-full text-xs font-semibold tracking-wider">REJECT</Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="grid lg:grid-cols-2 gap-6">
           <form onSubmit={createStaff} className="rounded-2xl border border-border bg-card p-6 space-y-4">
             <h2 className="font-heading text-lg font-semibold">New staff account</h2>
             <div className="space-y-2"><Label>Full name</Label><Input required value={staffForm.full_name} onChange={(e) => setStaffForm({ ...staffForm, full_name: e.target.value })} /></div>
@@ -305,6 +378,7 @@ const AdminPanel = () => {
                 </Button>
               </div>
             ))}
+          </div>
           </div>
         </TabsContent>
       </Tabs>

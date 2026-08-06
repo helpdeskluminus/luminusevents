@@ -23,9 +23,11 @@ export const RequireRole = ({ roles, children }: RequireRoleProps) => {
   if (!profile?.role) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background px-6 text-center">
-        <h1 className="font-heading text-2xl font-bold">No role assigned</h1>
+        <h1 className="font-heading text-2xl font-bold">Awaiting approval</h1>
         <p className="text-sm text-muted-foreground max-w-sm">
-          Your account has no staff role yet. Ask an admin to assign one, then sign in again.
+          Your account is created but hasn't been approved yet. An admin needs to review it
+          and assign you a role (Admin, Event OC, or Disciplinary Committee) before you can
+          access a dashboard.
         </p>
         <button onClick={signOut} className="text-xs font-semibold tracking-wider underline">SIGN OUT</button>
       </div>

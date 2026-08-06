@@ -1,9 +1,12 @@
-// Admin-only creation of staff accounts (disciplinary / event_oc) using the service role key.
-// There is no public signup for staff roles.
+// Admin-only creation and approval of staff accounts (admin / disciplinary / event_oc)
+// using the service role key. Public self-signup (see Auth.tsx "Create account") only
+// ever creates an auth user + profile row with no role — a role is granted here, by an
+// admin, via the 'approve' action. There is no way for a client to grant itself a role.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/qr.ts";
 
 const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+const VALID_ROLES = ["admin", "disciplinary", "event_oc"];
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -22,7 +25,50 @@ Deno.serve(async (req) => {
     if (!isAdmin) return json({ error: "Admins only" }, 403);
 
     const body = await req.json();
-    const action = body?.action === "delete" ? "delete" : body?.action === "assign" ? "assign" : "create";
+    const action = ["assign", "delete", "approve", "reject", "pending"].includes(body?.action) ? body.action : "create";
+
+    if (action === "pending") {
+      // Signed-up accounts with a profile but no role yet, awaiting admin approval.
+      const [{ data: profiles }, { data: roles }] = await Promise.all([
+        admin.from("profiles").select("id, full_name, email, created_at"),
+        admin.from("user_roles").select("user_id"),
+      ]);
+      const roled = new Set((roles ?? []).map((r) => r.user_id));
+      const pending = (profiles ?? []).filter((p) => !roled.has(p.id));
+      return json({ pending });
+    }
+
+    if (action === "approve") {
+      const userId: string = body?.user_id ?? "";
+      const role: string = body?.role ?? "";
+      const competitionId: string | null = body?.competition_id ?? null;
+      if (!/^[0-9a-f-]{36}$/i.test(userId)) return json({ error: "user_id required" }, 400);
+      if (!VALID_ROLES.includes(role)) return json({ error: "Invalid role" }, 400);
+      if (role === "event_oc" && !/^[0-9a-f-]{36}$/i.test(competitionId ?? "")) {
+        return json({ error: "Event OC accounts need a competition" }, 400);
+      }
+      const { error } = await admin.from("user_roles").insert({
+        user_id: userId,
+        role,
+        competition_id: role === "event_oc" ? competitionId : null,
+      });
+      if (error) return json({ error: error.message }, 400);
+      return json({ success: true });
+    }
+
+    if (action === "reject") {
+      // Rejecting a pending (roleless) signup — remove the account entirely.
+      const userId: string = body?.user_id ?? "";
+      if (!/^[0-9a-f-]{36}$/i.test(userId)) return json({ error: "user_id required" }, 400);
+      if (userId === callerId) return json({ error: "You cannot reject your own account" }, 400);
+      const { data: existingRoles } = await admin.from("user_roles").select("id").eq("user_id", userId).limit(1);
+      if (existingRoles && existingRoles.length > 0) {
+        return json({ error: "This account already has a role — use delete instead" }, 400);
+      }
+      const { error } = await admin.auth.admin.deleteUser(userId);
+      if (error) return json({ error: error.message }, 400);
+      return json({ success: true });
+    }
 
     if (action === "assign") {
       const userId: string = body?.user_id ?? "";

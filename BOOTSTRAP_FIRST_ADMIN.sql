@@ -2,15 +2,10 @@
 -- Bootstrap the first super-admin account
 -- ----------------------------------------------------------------------------
 -- Run this in the Supabase Dashboard -> SQL Editor AFTER the target person
--- has signed up / been created once in Supabase Auth (Authentication ->
--- Users -> Add user, or they've completed a sign-in attempt that created
--- the auth.users row).
+-- has an auth.users row — either by signing up themselves at /auth
+-- (Create account tab) or via Authentication -> Users -> Add user.
 --
 -- Replace the email below, then run.
---
--- (This replaces the old APPROVE_ADMIN.sql, which referenced a `public.users`
--- table with a `role`/`approval_status` column that no longer exists as of
--- migration 20260806043013 — running the old script is now a silent no-op.)
 -- ============================================================================
 
 do $$
