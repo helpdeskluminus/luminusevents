@@ -44,8 +44,8 @@ const Auth = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6">
       <Helmet>
-        <title>Staff Login | Techfest Check-in</title>
-        <meta name="description" content="Secure sign-in for techfest admin, disciplinary and event OC staff accounts." />
+        <title>Staff Sign In | Techfest Check-in</title>
+        <meta name="description" content="Sign-in for Admin, Event OC, and Disciplinary Committee accounts. Access is created and role-assigned by the fest admin." />
       </Helmet>
 
       <div className="w-full max-w-sm">
@@ -53,9 +53,11 @@ const Auth = () => {
           <ArrowLeft className="h-3.5 w-3.5" /> BACK TO SITE
         </button>
 
-        <h1 className="font-heading text-3xl font-bold tracking-tight">Staff login</h1>
+        <h1 className="font-heading text-3xl font-bold tracking-tight">Staff sign in</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Accounts are created by the admin. There is no public sign-up.
+          For Admin, Event OC, and Disciplinary Committee accounts only. Your account and role
+          are created by the fest admin — sign in below and you'll land on your own dashboard
+          automatically. No public sign-up.
         </p>
 
         <form onSubmit={signIn} className="mt-8 space-y-4">
