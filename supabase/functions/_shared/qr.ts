@@ -1,0 +1,59 @@
+export const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+export function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+const enc = new TextEncoder();
+
+function b64url(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function hmac(data: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(data));
+  return b64url(new Uint8Array(sig));
+}
+
+function secret(): string {
+  const s = Deno.env.get("QR_HMAC_SECRET");
+  if (!s) throw new Error("QR_HMAC_SECRET is not configured");
+  return s;
+}
+
+/**
+ * Builds an opaque, tamper-proof ticket token: <payload>.<hmac>
+ * payload = base64url(registrationId|competitionId|nonce)
+ * The token is never guessable and any modification invalidates the signature.
+ */
+export async function signTicketToken(registrationId: string, competitionId: string): Promise<string> {
+  const nonce = b64url(crypto.getRandomValues(new Uint8Array(12)));
+  const payload = b64url(enc.encode(`${registrationId}|${competitionId}|${nonce}`));
+  return `${payload}.${await hmac(payload, secret())}`;
+}
+
+/** Constant-time-ish verification of a scanned token. Returns false on any tampering. */
+export async function verifyTicketToken(token: string): Promise<boolean> {
+  if (typeof token !== "string" || !token.includes(".")) return false;
+  const [payload, sig] = token.split(".");
+  if (!payload || !sig) return false;
+  const expected = await hmac(payload, secret());
+  if (expected.length !== sig.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ sig.charCodeAt(i);
+  return diff === 0;
+}
+
+export function generateTicketCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return "TF-" + Array.from(bytes).map((b) => alphabet[b % alphabet.length]).join("");
+}
