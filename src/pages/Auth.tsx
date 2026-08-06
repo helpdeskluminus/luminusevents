@@ -1,196 +1,79 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { useToast } from '@/hooks/use-toast';
-import { config } from '@/lib/config';
-import { ArrowRight } from 'lucide-react';
-
-type Mode = 'login' | 'signup' | 'forgot';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { toast } from 'sonner';
+import { Helmet } from 'react-helmet-async';
+import { ArrowLeft } from 'lucide-react';
 
 const Auth = () => {
-  const [mode, setMode] = useState<Mode>('login');
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
-  const { toast } = useToast();
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) navigate('/');
-    });
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) navigate('/');
+      if (session) navigate('/staff', { replace: true });
     });
-    return () => subscription.unsubscribe();
   }, [navigate]);
 
-  const handleLogin = async () => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-  };
-
-  const handleSignup = async () => {
-    if (!fullName.trim()) throw new Error('Full name is required');
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: window.location.origin,
-        data: { full_name: fullName.trim() },
-      },
-    });
-    if (error) throw error;
-    if (data.user) {
-      await supabase.from('users').insert({
-        id: data.user.id,
-        full_name: fullName.trim(),
-        role: 'coordinator',
-        approval_status: 'pending',
-      }).then(() => {});
-    }
-    toast({ title: 'Account created', description: 'Please check your email to verify, then wait for admin approval.' });
-  };
-
-  const handleForgotPassword = async () => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
-    if (error) throw error;
-    toast({ title: 'Email sent', description: 'Check your inbox for the password reset link.' });
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const signIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    try {
-      if (mode === 'login') await handleLogin();
-      else if (mode === 'signup') await handleSignup();
-      else await handleForgotPassword();
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-      toast({ title: 'Error', description: errorMessage, variant: 'destructive' });
-    } finally {
-      setLoading(false);
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    setLoading(false);
+    if (error) {
+      toast.error(error.message);
+      return;
     }
+    navigate('/staff', { replace: true });
+  };
+
+  const resetPassword = async () => {
+    if (!email.trim()) return toast.error('Enter your email first');
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (error) toast.error(error.message);
+    else toast.success('Password reset link sent.');
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      {/* Nav */}
-      <header className="px-6 py-4 flex items-center gap-6">
-        <div className="h-8 w-8 rounded-full bg-foreground flex items-center justify-center">
-          <span className="text-background text-xs font-bold">L</span>
-        </div>
-        <nav className="flex gap-1">
-          <button
-            onClick={() => setMode('login')}
-            className={`px-4 py-1.5 text-xs font-semibold tracking-wider rounded-full border transition-colors
-              ${mode === 'login' ? 'border-foreground bg-foreground text-background' : 'border-border hover:border-foreground text-foreground'}`}
-          >
-            SIGN IN
-          </button>
-          <button
-            onClick={() => setMode('signup')}
-            className={`px-4 py-1.5 text-xs font-semibold tracking-wider rounded-full border transition-colors
-              ${mode === 'signup' ? 'border-foreground bg-foreground text-background' : 'border-border hover:border-foreground text-foreground'}`}
-          >
-            CREATE ACCOUNT
-          </button>
-        </nav>
-      </header>
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6">
+      <Helmet>
+        <title>Staff Login | Techfest Check-in</title>
+        <meta name="description" content="Secure sign-in for techfest admin, disciplinary and event OC staff accounts." />
+      </Helmet>
 
-      {/* Hero */}
-      <div className="flex-1 flex items-center justify-center px-4">
-        <div className="w-full max-w-md space-y-10">
-          <div className="text-center space-y-4">
-            <h1 className="text-5xl md:text-6xl font-bold tracking-tight text-foreground leading-none">
-              {mode === 'login' && (
-                <>
-                  <span className="bordered-text">Welcome</span>{' '}
-                  <span className="highlight-text">back</span>
-                </>
-              )}
-              {mode === 'signup' && (
-                <>
-                  <span className="bordered-text">Join</span>{' '}
-                  <span className="highlight-text">{config.appName}</span>
-                </>
-              )}
-              {mode === 'forgot' && (
-                <>
-                  <span className="bordered-text">Reset</span>{' '}
-                  <span className="highlight-text">password</span>
-                </>
-              )}
-            </h1>
-            <p className="text-sm text-muted-foreground font-body max-w-xs mx-auto">
-              {mode === 'login' && 'Sign in to manage events and check-ins.'}
-              {mode === 'signup' && 'Create your coordinator account to get started.'}
-              {mode === 'forgot' && 'Enter your email to receive a reset link.'}
-            </p>
+      <div className="w-full max-w-sm">
+        <button onClick={() => navigate('/')} className="inline-flex items-center gap-2 text-xs font-semibold tracking-wider text-muted-foreground hover:text-foreground mb-8">
+          <ArrowLeft className="h-3.5 w-3.5" /> BACK TO SITE
+        </button>
+
+        <h1 className="font-heading text-3xl font-bold tracking-tight">Staff login</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Accounts are created by the admin. There is no public sign-up.
+        </p>
+
+        <form onSubmit={signIn} className="mt-8 space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
-
-          <form onSubmit={handleSubmit} className="space-y-3">
-            {mode === 'signup' && (
-              <Input
-                placeholder="Full Name"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                required
-                className="h-12 rounded-full px-5 bg-secondary border-border text-foreground font-body"
-              />
-            )}
-            <Input
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="h-12 rounded-full px-5 bg-secondary border-border text-foreground font-body"
-            />
-            {mode !== 'forgot' && (
-              <Input
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
-                className="h-12 rounded-full px-5 bg-secondary border-border text-foreground font-body"
-              />
-            )}
-            <Button
-              type="submit"
-              disabled={loading}
-              className="w-full h-12 rounded-full text-sm font-semibold tracking-wider gap-2"
-            >
-              {loading ? 'Please wait...' : mode === 'login' ? 'SIGN IN' : mode === 'signup' ? 'CREATE ACCOUNT' : 'SEND RESET LINK'}
-              {!loading && <ArrowRight className="h-4 w-4" />}
-            </Button>
-          </form>
-
-          <div className="flex flex-col items-center gap-3 text-xs font-body">
-            {mode === 'login' && (
-              <>
-                <button onClick={() => setMode('forgot')} className="text-muted-foreground hover:text-foreground transition-colors">
-                  Forgot password?
-                </button>
-                <button onClick={() => setMode('signup')} className="text-muted-foreground hover:text-foreground transition-colors">
-                  Don't have an account? <span className="text-primary font-semibold">Sign up</span>
-                </button>
-              </>
-            )}
-            {mode !== 'login' && (
-              <button onClick={() => setMode('login')} className="text-muted-foreground hover:text-foreground transition-colors">
-                ← Back to sign in
-              </button>
-            )}
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
-        </div>
+          <Button type="submit" disabled={loading} className="w-full rounded-full text-xs font-semibold tracking-wider">
+            {loading ? 'SIGNING IN…' : 'SIGN IN'}
+          </Button>
+          <button type="button" onClick={resetPassword} className="w-full text-xs text-muted-foreground hover:text-foreground">
+            Forgot password?
+          </button>
+        </form>
       </div>
     </div>
   );
