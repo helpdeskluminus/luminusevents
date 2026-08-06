@@ -3,13 +3,15 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
+import CompetitionDetail from "./pages/CompetitionDetail";
 import Auth from "./pages/Auth";
 import ResetPassword from "./pages/ResetPassword";
-import PendingApproval from "./pages/PendingApproval";
 import AdminDashboard from "./pages/AdminDashboard";
-import AdminReconciliation from "./pages/AdminReconciliation";
-import CoordinatorDashboard from "./pages/CoordinatorDashboard";
-import Scan from "./pages/Scan";
+import GateDashboard from "./pages/GateDashboard";
+import OcDashboard from "./pages/OcDashboard";
+import ScanGate from "./pages/ScanGate";
+import ScanVenue from "./pages/ScanVenue";
+import StaffHome from "./pages/StaffHome";
 import NotFound from "./pages/NotFound";
 
 const App = () => (
@@ -18,13 +20,15 @@ const App = () => (
     <Sonner />
     <Routes>
       <Route path="/" element={<Index />} />
+      <Route path="/c/:id" element={<CompetitionDetail />} />
       <Route path="/auth" element={<Auth />} />
       <Route path="/reset-password" element={<ResetPassword />} />
-      <Route path="/pending" element={<PendingApproval />} />
+      <Route path="/staff" element={<StaffHome />} />
       <Route path="/admin" element={<AdminDashboard />} />
-      <Route path="/admin/reconciliation" element={<AdminReconciliation />} />
-      <Route path="/coordinator" element={<CoordinatorDashboard />} />
-      <Route path="/scan" element={<Scan />} />
+      <Route path="/gate" element={<GateDashboard />} />
+      <Route path="/oc" element={<OcDashboard />} />
+      <Route path="/scan/gate" element={<ScanGate />} />
+      <Route path="/scan/venue" element={<ScanVenue />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   </TooltipProvider>
