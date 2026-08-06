@@ -16,36 +16,242 @@ export type Database = {
     Tables: {
       checkins: {
         Row: {
-          event_id: string
+          checkin_type: string
+          competition_id: string | null
+          device_info: string | null
           id: string
-          participant_id: string
+          is_duplicate: boolean
+          registration_id: string
           scanned_at: string
-          scanned_by: string
+          scanned_by: string | null
         }
         Insert: {
-          event_id: string
+          checkin_type: string
+          competition_id?: string | null
+          device_info?: string | null
           id?: string
-          participant_id: string
+          is_duplicate?: boolean
+          registration_id: string
           scanned_at?: string
-          scanned_by: string
+          scanned_by?: string | null
         }
         Update: {
-          event_id?: string
+          checkin_type?: string
+          competition_id?: string | null
+          device_info?: string | null
           id?: string
-          participant_id?: string
+          is_duplicate?: boolean
+          registration_id?: string
           scanned_at?: string
-          scanned_by?: string
+          scanned_by?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "checkins_event_id_fkey"
+            foreignKeyName: "checkins_competition_id_fkey"
+            columns: ["competition_id"]
+            isOneToOne: false
+            referencedRelation: "competitions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "checkins_registration_id_fkey"
+            columns: ["registration_id"]
+            isOneToOne: false
+            referencedRelation: "registrations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competitions: {
+        Row: {
+          capacity: number | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          end_time: string | null
+          event_id: string
+          id: string
+          name: string
+          poster_url: string | null
+          rules_url: string | null
+          start_time: string | null
+          updated_at: string
+          venue: string | null
+        }
+        Insert: {
+          capacity?: number | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          end_time?: string | null
+          event_id: string
+          id?: string
+          name: string
+          poster_url?: string | null
+          rules_url?: string | null
+          start_time?: string | null
+          updated_at?: string
+          venue?: string | null
+        }
+        Update: {
+          capacity?: number | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          end_time?: string | null
+          event_id?: string
+          id?: string
+          name?: string
+          poster_url?: string | null
+          rules_url?: string | null
+          start_time?: string | null
+          updated_at?: string
+          venue?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competitions_event_id_fkey"
             columns: ["event_id"]
             isOneToOne: false
             referencedRelation: "events"
             referencedColumns: ["id"]
           },
+        ]
+      }
+      events: {
+        Row: {
+          banner_url: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          end_date: string | null
+          id: string
+          name: string
+          start_date: string | null
+          updated_at: string
+        }
+        Insert: {
+          banner_url?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          end_date?: string | null
+          id?: string
+          name: string
+          start_date?: string | null
+          updated_at?: string
+        }
+        Update: {
+          banner_url?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          end_date?: string | null
+          id?: string
+          name?: string
+          start_date?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      participants: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          name: string
+          organization: string | null
+          phone: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          name: string
+          organization?: string | null
+          phone?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          name?: string
+          organization?: string | null
+          phone?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          email: string | null
+          full_name: string
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          full_name?: string
+          id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          full_name?: string
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      registrations: {
+        Row: {
+          competition_id: string
+          created_at: string
+          email_sent_at: string | null
+          id: string
+          participant_id: string
+          qr_secret_token: string
+          status: string
+          ticket_code: string
+          updated_at: string
+        }
+        Insert: {
+          competition_id: string
+          created_at?: string
+          email_sent_at?: string | null
+          id?: string
+          participant_id: string
+          qr_secret_token: string
+          status?: string
+          ticket_code: string
+          updated_at?: string
+        }
+        Update: {
+          competition_id?: string
+          created_at?: string
+          email_sent_at?: string | null
+          id?: string
+          participant_id?: string
+          qr_secret_token?: string
+          status?: string
+          ticket_code?: string
+          updated_at?: string
+        }
+        Relationships: [
           {
-            foreignKeyName: "checkins_participant_id_fkey"
+            foreignKeyName: "registrations_competition_id_fkey"
+            columns: ["competition_id"]
+            isOneToOne: false
+            referencedRelation: "competitions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "registrations_participant_id_fkey"
             columns: ["participant_id"]
             isOneToOne: false
             referencedRelation: "participants"
@@ -53,105 +259,37 @@ export type Database = {
           },
         ]
       }
-      events: {
+      user_roles: {
         Row: {
-          created_at: string | null
-          date: string
+          competition_id: string | null
+          created_at: string
           id: string
-          location: string
-          name: string
+          role: Database["public"]["Enums"]["app_role"]
+          updated_at: string
+          user_id: string
         }
         Insert: {
-          created_at?: string | null
-          date: string
+          competition_id?: string | null
+          created_at?: string
           id?: string
-          location: string
-          name: string
+          role: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+          user_id: string
         }
         Update: {
-          created_at?: string | null
-          date?: string
+          competition_id?: string | null
+          created_at?: string
           id?: string
-          location?: string
-          name?: string
-        }
-        Relationships: []
-      }
-      participants: {
-        Row: {
-          checked_in: boolean | null
-          checked_in_at: string | null
-          created_at: string | null
-          email: string | null
-          event_id: string
-          id: string
-          name: string
-          phone: string | null
-          qr_token: string
-        }
-        Insert: {
-          checked_in?: boolean | null
-          checked_in_at?: string | null
-          created_at?: string | null
-          email?: string | null
-          event_id: string
-          id?: string
-          name: string
-          phone?: string | null
-          qr_token: string
-        }
-        Update: {
-          checked_in?: boolean | null
-          checked_in_at?: string | null
-          created_at?: string | null
-          email?: string | null
-          event_id?: string
-          id?: string
-          name?: string
-          phone?: string | null
-          qr_token?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+          user_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "participants_event_id_fkey"
-            columns: ["event_id"]
+            foreignKeyName: "user_roles_competition_id_fkey"
+            columns: ["competition_id"]
             isOneToOne: false
-            referencedRelation: "events"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      users: {
-        Row: {
-          approval_status: string
-          assigned_event_id: string | null
-          created_at: string | null
-          full_name: string
-          id: string
-          role: string
-        }
-        Insert: {
-          approval_status?: string
-          assigned_event_id?: string | null
-          created_at?: string | null
-          full_name: string
-          id: string
-          role?: string
-        }
-        Update: {
-          approval_status?: string
-          assigned_event_id?: string | null
-          created_at?: string | null
-          full_name?: string
-          id?: string
-          role?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "users_assigned_event_id_fkey"
-            columns: ["assigned_event_id"]
-            isOneToOne: false
-            referencedRelation: "events"
+            referencedRelation: "competitions"
             referencedColumns: ["id"]
           },
         ]
@@ -161,16 +299,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      checkin_participant: {
-        Args: { _event_id: string; _participant_id: string; _qr_token: string }
-        Returns: Json
+      get_user_competition: { Args: { _user_id: string }; Returns: string }
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
       }
-      get_user_approval_status: { Args: { _user_id: string }; Returns: string }
-      get_user_assigned_event: { Args: { _user_id: string }; Returns: string }
-      get_user_role: { Args: { _user_id: string }; Returns: string }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "disciplinary" | "event_oc"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -297,6 +436,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "disciplinary", "event_oc"],
+    },
   },
 } as const
