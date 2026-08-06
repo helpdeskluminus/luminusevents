@@ -34,6 +34,12 @@ Deno.serve(async (req) => {
         .eq("user_id", userId)
         .eq("role", "event_oc");
       if (error) return json({ error: error.message }, 400);
+
+      if (body?.position !== undefined) {
+        const position: string | null = String(body?.position ?? "").trim().slice(0, 120) || null;
+        const { error: posErr } = await admin.from("profiles").update({ position }).eq("id", userId);
+        if (posErr) return json({ error: posErr.message }, 400);
+      }
       return json({ success: true });
     }
 
@@ -51,6 +57,8 @@ Deno.serve(async (req) => {
     const password = String(body?.password ?? "");
     const role = String(body?.role ?? "");
     const competitionId: string | null = body?.competition_id ?? null;
+    // Display-only title, e.g. "Head of Logistics" — never used in any access check.
+    const position: string | null = String(body?.position ?? "").trim().slice(0, 120) || null;
 
     const errors: string[] = [];
     if (fullName.length < 2 || fullName.length > 120) errors.push("Name must be 2-120 characters");
@@ -69,7 +77,7 @@ Deno.serve(async (req) => {
     if (createErr || !created?.user) return json({ error: createErr?.message ?? "Could not create user" }, 400);
 
     const newUserId = created.user.id;
-    await admin.from("profiles").upsert({ id: newUserId, full_name: fullName, email });
+    await admin.from("profiles").upsert({ id: newUserId, full_name: fullName, email, position });
     const { error: roleErr } = await admin.from("user_roles").insert({
       user_id: newUserId,
       role,

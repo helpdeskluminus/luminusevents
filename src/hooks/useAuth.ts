@@ -8,6 +8,7 @@ export interface StaffProfile {
   id: string;
   full_name: string;
   email: string | null;
+  position: string | null;
   role: AppRole | null;
   competition_id: string | null;
 }
@@ -19,7 +20,7 @@ export function useAuth() {
 
   const fetchProfile = useCallback(async (authUser: User): Promise<StaffProfile | null> => {
     const [{ data: prof }, { data: roles }] = await Promise.all([
-      supabase.from('profiles').select('id, full_name, email').eq('id', authUser.id).maybeSingle(),
+      supabase.from('profiles').select('id, full_name, email, position').eq('id', authUser.id).maybeSingle(),
       supabase.from('user_roles').select('role, competition_id').eq('user_id', authUser.id),
     ]);
 
@@ -28,6 +29,7 @@ export function useAuth() {
       id: authUser.id,
       full_name: prof?.full_name ?? (authUser.user_metadata?.full_name as string) ?? authUser.email ?? 'Staff',
       email: prof?.email ?? authUser.email ?? null,
+      position: prof?.position ?? null,
       role: (primary?.role as AppRole) ?? null,
       competition_id: primary?.competition_id ?? null,
     };
