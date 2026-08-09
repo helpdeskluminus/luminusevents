@@ -77,7 +77,7 @@ export const QrScanner = ({ onScan, paused }: QrScannerProps) => {
         <Input
           value={manual}
           onChange={(e) => setManual(e.target.value)}
-          placeholder="Paste ticket token manually"
+          placeholder="Or enter ticket code, e.g. TF-XXXXXXXX"
           className="text-xs"
         />
         <Button type="submit" variant="outline" className="rounded-full text-xs font-semibold shrink-0">CHECK</Button>

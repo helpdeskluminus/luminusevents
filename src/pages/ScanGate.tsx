@@ -23,8 +23,15 @@ const GateScanner = () => {
     lastToken.current = { token, at: now };
 
     setBusy(true);
+    // Camera scans decode to the signed QR token (contains a '.'); manual entry
+    // uses the short TF-XXXXXXXX ticket code printed on the ticket/email instead.
+    const isTicketCode = !token.includes('.');
     const { data, error } = await supabase.functions.invoke('scan-ticket', {
-      body: { token, mode: 'gate', device_info: navigator.userAgent.slice(0, 120) },
+      body: {
+        ...(isTicketCode ? { ticket_code: token } : { token }),
+        mode: 'gate',
+        device_info: navigator.userAgent.slice(0, 120),
+      },
     });
     setBusy(false);
 

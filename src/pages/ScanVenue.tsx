@@ -36,8 +36,13 @@ const VenueScanner = () => {
     lastToken.current = { token, at: now };
 
     setBusy(true);
+    const isTicketCode = !token.includes('.');
     const { data, error } = await supabase.functions.invoke('scan-ticket', {
-      body: { token, mode: 'venue', device_info: navigator.userAgent.slice(0, 120) },
+      body: {
+        ...(isTicketCode ? { ticket_code: token } : { token }),
+        mode: 'venue',
+        device_info: navigator.userAgent.slice(0, 120),
+      },
     });
     setBusy(false);
 
