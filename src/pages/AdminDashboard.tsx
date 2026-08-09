@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { Helmet } from 'react-helmet-async';
 import { formatDateTime } from '@/lib/format';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Sparkles, Upload } from 'lucide-react';
 
 interface EventRow { id: string; name: string; description: string | null; banner_url: string | null; start_date: string | null; end_date: string | null }
 interface CompetitionRow { id: string; event_id: string; name: string; venue: string | null; start_time: string | null; capacity: number | null }
@@ -43,6 +43,40 @@ const AdminPanel = () => {
   const [broadcasts, setBroadcasts] = useState<BroadcastRow[]>([]);
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const [eventExtracting, setEventExtracting] = useState(false);
+  const [compExtracting, setCompExtracting] = useState(false);
+
+  const uploadPosterAndExtract = async (
+    file: File,
+    onUrl: (url: string) => void,
+    applyExtracted: (fields: Record<string, string>) => void,
+    setExtracting: (b: boolean) => void
+  ) => {
+    if (!file.type.startsWith('image/')) return toast.error('Please choose an image file');
+    setExtracting(true);
+    try {
+      const path = `posters/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`;
+      const { error: upErr } = await supabase.storage.from('event-images').upload(path, file);
+      if (upErr) return toast.error(upErr.message);
+
+      const { data: pub } = supabase.storage.from('event-images').getPublicUrl(path);
+      onUrl(pub.publicUrl);
+      toast.success('Poster uploaded — reading details…');
+
+      const { data, error } = await supabase.functions.invoke('extract-poster-details', { body: { image_url: pub.publicUrl } });
+      const payload = data as { error?: string; extracted?: Record<string, string> } | null;
+      if (error || payload?.error) {
+        toast.error(payload?.error ?? 'Poster uploaded, but auto-fill failed — enter details manually');
+        return;
+      }
+      applyExtracted(payload!.extracted!);
+      const confidence = payload!.extracted!.confidence ?? 'unknown';
+      toast.success(`Auto-filled from poster (${confidence} confidence) — please double-check before saving`);
+    } finally {
+      setExtracting(false);
+    }
+  };
 
   const loadPending = useCallback(async () => {
     const { data, error } = await supabase.functions.invoke('create-staff-user', { body: { action: 'pending' } });
@@ -299,6 +333,36 @@ const AdminPanel = () => {
             <div className="space-y-2"><Label>Description</Label><Textarea value={eventForm.description} onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })} /></div>
             <div className="space-y-2"><Label>Banner image URL</Label><Input value={eventForm.banner_url} onChange={(e) => setEventForm({ ...eventForm, banner_url: e.target.value })} /></div>
             <div className="space-y-2">
+              <Label className="flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-primary" /> Or upload a poster to auto-fill</Label>
+              <label className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border p-4 text-xs text-muted-foreground cursor-pointer hover:border-primary/50">
+                {eventExtracting ? 'Reading poster…' : <><Upload className="h-3.5 w-3.5" /> Choose an image</>}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={eventExtracting}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    void uploadPosterAndExtract(
+                      file,
+                      (url) => setEventForm((f) => ({ ...f, banner_url: url })),
+                      (ex) => setEventForm((f) => ({
+                        ...f,
+                        name: f.name || ex.name || f.name,
+                        description: f.description || ex.description || f.description,
+                        start_date: f.start_date || ex.date || f.start_date,
+                        end_date: f.end_date || ex.end_date || f.end_date,
+                      })),
+                      setEventExtracting
+                    );
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+              <p className="text-xs text-muted-foreground">Reads the name, dates and description off the image. Only fills blank fields — review before saving.</p>
+            </div>
+            <div className="space-y-2">
               <Label>Max main-gate scans per ticket</Label>
               <Input type="number" min={0} value={eventForm.max_gate_scans} onChange={(e) => setEventForm({ ...eventForm, max_gate_scans: e.target.value })} />
               <p className="text-xs text-muted-foreground">0 = unlimited re-entries. Set to 1 for single-entry gate passes.</p>
@@ -333,6 +397,37 @@ const AdminPanel = () => {
             <div className="space-y-2"><Label>Name</Label><Input required value={compForm.name} onChange={(e) => setCompForm({ ...compForm, name: e.target.value })} /></div>
             <div className="space-y-2"><Label>Description</Label><Textarea value={compForm.description} onChange={(e) => setCompForm({ ...compForm, description: e.target.value })} /></div>
             <div className="space-y-2"><Label>Poster image URL</Label><Input value={compForm.poster_url} onChange={(e) => setCompForm({ ...compForm, poster_url: e.target.value })} /></div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-primary" /> Or upload a poster to auto-fill</Label>
+              <label className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border p-4 text-xs text-muted-foreground cursor-pointer hover:border-primary/50">
+                {compExtracting ? 'Reading poster…' : <><Upload className="h-3.5 w-3.5" /> Choose an image</>}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={compExtracting}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    void uploadPosterAndExtract(
+                      file,
+                      (url) => setCompForm((f) => ({ ...f, poster_url: url })),
+                      (ex) => setCompForm((f) => ({
+                        ...f,
+                        name: f.name || ex.name || f.name,
+                        description: f.description || ex.description || f.description,
+                        venue: f.venue || ex.venue || f.venue,
+                        start_time: f.start_time || (ex.date && ex.start_time ? `${ex.date}T${ex.start_time}` : f.start_time),
+                        end_time: f.end_time || (ex.end_date && ex.end_time ? `${ex.end_date}T${ex.end_time}` : ex.date && ex.end_time ? `${ex.date}T${ex.end_time}` : f.end_time),
+                      })),
+                      setCompExtracting
+                    );
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+              <p className="text-xs text-muted-foreground">Reads the name, venue, times and description off the image. Only fills blank fields — review before saving.</p>
+            </div>
             <div className="space-y-2"><Label>Venue</Label><Input value={compForm.venue} onChange={(e) => setCompForm({ ...compForm, venue: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2"><Label>Start</Label><Input type="datetime-local" value={compForm.start_time} onChange={(e) => setCompForm({ ...compForm, start_time: e.target.value })} /></div>
