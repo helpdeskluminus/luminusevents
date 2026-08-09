@@ -89,14 +89,21 @@ const AdminPanel = () => {
   }, []);
 
   const loadStructure = useCallback(async () => {
-    const [{ data: ev }, { data: comps }, { data: roles }] = await Promise.all([
+    const [{ data: ev }, { data: comps }, { data: roles }, { data: profs }] = await Promise.all([
       supabase.from('events').select('*').order('created_at', { ascending: false }),
       supabase.from('competitions').select('id, event_id, name, venue, start_time, capacity').order('start_time'),
-      supabase.from('user_roles').select('user_id, role, competition_id, profiles(full_name, email, position)'),
+      supabase.from('user_roles').select('user_id, role, competition_id'),
+      supabase.from('profiles').select('id, full_name, email, position'),
     ]);
     setEvents((ev as EventRow[]) ?? []);
     setCompetitions((comps as CompetitionRow[]) ?? []);
-    setStaff((roles as unknown as StaffRow[]) ?? []);
+    const profileById = new Map((profs ?? []).map((p) => [(p as { id: string }).id, p]));
+    setStaff(((roles ?? []).map((r) => {
+      const row = r as { user_id: string; role: string; competition_id: string | null };
+      const p = profileById.get(row.user_id) as { full_name: string; email: string | null; position: string | null } | undefined;
+      return { ...row, profiles: p ? { full_name: p.full_name, email: p.email, position: p.position } : null };
+    }) as unknown as StaffRow[]) ?? []);
+
     void loadPending();
     void loadBroadcasts();
   }, [loadPending, loadBroadcasts]);

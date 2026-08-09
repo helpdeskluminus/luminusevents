@@ -71,6 +71,7 @@ export type Database = {
           end_time: string | null
           event_id: string
           id: string
+          max_venue_scans: number
           name: string
           poster_url: string | null
           rules_url: string | null
@@ -86,6 +87,7 @@ export type Database = {
           end_time?: string | null
           event_id: string
           id?: string
+          max_venue_scans?: number
           name: string
           poster_url?: string | null
           rules_url?: string | null
@@ -101,6 +103,7 @@ export type Database = {
           end_time?: string | null
           event_id?: string
           id?: string
+          max_venue_scans?: number
           name?: string
           poster_url?: string | null
           rules_url?: string | null
@@ -118,6 +121,56 @@ export type Database = {
           },
         ]
       }
+      email_broadcasts: {
+        Row: {
+          audience_type: string
+          body: string
+          competition_id: string | null
+          created_at: string
+          error: string | null
+          failed_count: number
+          id: string
+          recipient_count: number
+          sent_by: string | null
+          status: string
+          subject: string
+        }
+        Insert: {
+          audience_type: string
+          body: string
+          competition_id?: string | null
+          created_at?: string
+          error?: string | null
+          failed_count?: number
+          id?: string
+          recipient_count?: number
+          sent_by?: string | null
+          status?: string
+          subject: string
+        }
+        Update: {
+          audience_type?: string
+          body?: string
+          competition_id?: string | null
+          created_at?: string
+          error?: string | null
+          failed_count?: number
+          id?: string
+          recipient_count?: number
+          sent_by?: string | null
+          status?: string
+          subject?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_broadcasts_competition_id_fkey"
+            columns: ["competition_id"]
+            isOneToOne: false
+            referencedRelation: "competitions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       events: {
         Row: {
           banner_url: string | null
@@ -126,6 +179,7 @@ export type Database = {
           description: string | null
           end_date: string | null
           id: string
+          max_gate_scans: number
           name: string
           start_date: string | null
           updated_at: string
@@ -137,6 +191,7 @@ export type Database = {
           description?: string | null
           end_date?: string | null
           id?: string
+          max_gate_scans?: number
           name: string
           start_date?: string | null
           updated_at?: string
@@ -148,6 +203,7 @@ export type Database = {
           description?: string | null
           end_date?: string | null
           id?: string
+          max_gate_scans?: number
           name?: string
           start_date?: string | null
           updated_at?: string
@@ -190,6 +246,7 @@ export type Database = {
           email: string | null
           full_name: string
           id: string
+          position: string | null
           updated_at: string
         }
         Insert: {
@@ -197,6 +254,7 @@ export type Database = {
           email?: string | null
           full_name?: string
           id: string
+          position?: string | null
           updated_at?: string
         }
         Update: {
@@ -204,6 +262,7 @@ export type Database = {
           email?: string | null
           full_name?: string
           id?: string
+          position?: string | null
           updated_at?: string
         }
         Relationships: []
