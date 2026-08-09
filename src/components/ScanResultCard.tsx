@@ -5,6 +5,8 @@ export interface ScanResult {
   reason?: string | null;
   participant?: { name: string; email?: string; organization?: string | null; ticket_code?: string } | null;
   competitions?: { name: string; venue: string | null; start_time: string | null }[];
+  scan_count?: number | null;
+  max_scans?: number | null;
 }
 
 const STYLES = {
@@ -35,6 +37,11 @@ export const ScanResultCard = ({ result, showCompetitions }: { result: ScanResul
         <p className="mt-1 text-xs tracking-widest text-muted-foreground">#{result.participant.ticket_code}</p>
       )}
       {result.reason && <p className="mt-3 text-sm font-medium">{result.reason}</p>}
+      {!!result.max_scans && (
+        <p className="mt-1 text-xs font-semibold tracking-wide text-muted-foreground">
+          SCAN {Math.min(result.scan_count ?? 0, result.max_scans)} OF {result.max_scans}
+        </p>
+      )}
 
       {showCompetitions && result.competitions && result.competitions.length > 0 && (
         <div className="mt-4 pt-4 border-t border-border">

@@ -19,9 +19,12 @@ interface StaffRow { user_id: string; role: string; competition_id: string | nul
 interface PendingRow { id: string; full_name: string; email: string | null; created_at: string }
 interface Stats { gate: number; registrations: number; perCompetition: Record<string, number> }
 
-const emptyEvent = { name: '', description: '', banner_url: '', start_date: '', end_date: '' };
-const emptyComp = { event_id: '', name: '', description: '', poster_url: '', venue: '', start_time: '', end_time: '', capacity: '', rules_url: '' };
+const emptyEvent = { name: '', description: '', banner_url: '', start_date: '', end_date: '', max_gate_scans: '0' };
+const emptyComp = { event_id: '', name: '', description: '', poster_url: '', venue: '', start_time: '', end_time: '', capacity: '', rules_url: '', max_venue_scans: '0' };
 const emptyStaff = { full_name: '', email: '', password: '', role: 'disciplinary', competition_id: '', position: '' };
+const emptyBroadcast = { subject: '', body: '', audience_type: 'all_participants', competition_id: '', emails: '' };
+
+interface BroadcastRow { id: string; subject: string; audience_type: string; competition_id: string | null; recipient_count: number; failed_count: number; status: string; created_at: string }
 
 const AdminPanel = () => {
   const tick = useLiveTick(['checkins', 'registrations']);
@@ -36,11 +39,19 @@ const AdminPanel = () => {
   const [eventForm, setEventForm] = useState(emptyEvent);
   const [compForm, setCompForm] = useState(emptyComp);
   const [staffForm, setStaffForm] = useState(emptyStaff);
+  const [broadcastForm, setBroadcastForm] = useState(emptyBroadcast);
+  const [broadcasts, setBroadcasts] = useState<BroadcastRow[]>([]);
+  const [sendingBroadcast, setSendingBroadcast] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const loadPending = useCallback(async () => {
     const { data, error } = await supabase.functions.invoke('create-staff-user', { body: { action: 'pending' } });
     if (!error) setPending(((data as { pending?: PendingRow[] } | null)?.pending) ?? []);
+  }, []);
+
+  const loadBroadcasts = useCallback(async () => {
+    const { data } = await supabase.from('email_broadcasts').select('id, subject, audience_type, competition_id, recipient_count, failed_count, status, created_at').order('created_at', { ascending: false }).limit(20);
+    setBroadcasts((data as BroadcastRow[]) ?? []);
   }, []);
 
   const loadStructure = useCallback(async () => {
@@ -53,7 +64,8 @@ const AdminPanel = () => {
     setCompetitions((comps as CompetitionRow[]) ?? []);
     setStaff((roles as unknown as StaffRow[]) ?? []);
     void loadPending();
-  }, [loadPending]);
+    void loadBroadcasts();
+  }, [loadPending, loadBroadcasts]);
 
   const loadStats = useCallback(async () => {
     const [{ count: gate }, { count: regs }, { data: venueRows }] = await Promise.all([
@@ -93,6 +105,7 @@ const AdminPanel = () => {
       banner_url: eventForm.banner_url.trim() || null,
       start_date: eventForm.start_date || null,
       end_date: eventForm.end_date || null,
+      max_gate_scans: Math.max(0, Number(eventForm.max_gate_scans) || 0),
     });
     setSaving(false);
     if (error) return toast.error(error.message);
@@ -115,6 +128,7 @@ const AdminPanel = () => {
       end_time: compForm.end_time || null,
       capacity: compForm.capacity ? Number(compForm.capacity) : null,
       rules_url: compForm.rules_url.trim() || null,
+      max_venue_scans: Math.max(0, Number(compForm.max_venue_scans) || 0),
     });
     setSaving(false);
     if (error) return toast.error(error.message);
@@ -174,6 +188,46 @@ const AdminPanel = () => {
     void loadStructure();
   };
 
+  const sendBroadcast = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!broadcastForm.subject.trim()) return toast.error('Subject is required');
+    if (!broadcastForm.body.trim()) return toast.error('Message body is required');
+    if (broadcastForm.audience_type === 'competition_participants' && !broadcastForm.competition_id) {
+      return toast.error('Pick a competition');
+    }
+
+    let emails: string[] | undefined;
+    if (broadcastForm.audience_type === 'custom') {
+      emails = broadcastForm.emails.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+      if (emails.length === 0) return toast.error('Add at least one email');
+    }
+
+    const audienceLabel =
+      broadcastForm.audience_type === 'all_participants' ? 'ALL participants' :
+      broadcastForm.audience_type === 'competition_participants' ? `participants of ${competitions.find((c) => c.id === broadcastForm.competition_id)?.name ?? 'this competition'}` :
+      broadcastForm.audience_type === 'all_staff' ? 'ALL approved staff' :
+      `${emails?.length ?? 0} custom email(s)`;
+
+    if (!window.confirm(`Send this email to ${audienceLabel}? This can't be undone.`)) return;
+
+    setSendingBroadcast(true);
+    const { data, error } = await supabase.functions.invoke('send-broadcast-email', {
+      body: {
+        subject: broadcastForm.subject.trim(),
+        body: broadcastForm.body.trim(),
+        audience_type: broadcastForm.audience_type,
+        competition_id: broadcastForm.audience_type === 'competition_participants' ? broadcastForm.competition_id : null,
+        emails,
+      },
+    });
+    setSendingBroadcast(false);
+    const payload = data as { error?: string; sent?: number; failed?: number; total?: number } | null;
+    if (error || payload?.error) return toast.error(payload?.error ?? 'Could not send broadcast');
+    toast.success(`Sent to ${payload?.sent ?? 0} of ${payload?.total ?? 0} recipients${payload?.failed ? ` (${payload.failed} failed)` : ''}`);
+    setBroadcastForm(emptyBroadcast);
+    void loadBroadcasts();
+  };
+
   return (
     <main className="max-w-6xl mx-auto px-6 py-10">
       <Helmet>
@@ -204,6 +258,7 @@ const AdminPanel = () => {
           <TabsTrigger value="live">Live</TabsTrigger>
           <TabsTrigger value="events">Events</TabsTrigger>
           <TabsTrigger value="competitions">Competitions</TabsTrigger>
+          <TabsTrigger value="broadcast">Broadcast</TabsTrigger>
           <TabsTrigger value="staff">
             Staff{pending.length > 0 && <span className="ml-1.5 rounded-full bg-primary text-primary-foreground text-[10px] px-1.5 py-0.5">{pending.length}</span>}
           </TabsTrigger>
@@ -243,6 +298,11 @@ const AdminPanel = () => {
             <div className="space-y-2"><Label>Name</Label><Input required value={eventForm.name} onChange={(e) => setEventForm({ ...eventForm, name: e.target.value })} /></div>
             <div className="space-y-2"><Label>Description</Label><Textarea value={eventForm.description} onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })} /></div>
             <div className="space-y-2"><Label>Banner image URL</Label><Input value={eventForm.banner_url} onChange={(e) => setEventForm({ ...eventForm, banner_url: e.target.value })} /></div>
+            <div className="space-y-2">
+              <Label>Max main-gate scans per ticket</Label>
+              <Input type="number" min={0} value={eventForm.max_gate_scans} onChange={(e) => setEventForm({ ...eventForm, max_gate_scans: e.target.value })} />
+              <p className="text-xs text-muted-foreground">0 = unlimited re-entries. Set to 1 for single-entry gate passes.</p>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2"><Label>Start</Label><Input type="date" value={eventForm.start_date} onChange={(e) => setEventForm({ ...eventForm, start_date: e.target.value })} /></div>
               <div className="space-y-2"><Label>End</Label><Input type="date" value={eventForm.end_date} onChange={(e) => setEventForm({ ...eventForm, end_date: e.target.value })} /></div>
@@ -282,6 +342,11 @@ const AdminPanel = () => {
               <div className="space-y-2"><Label>Capacity</Label><Input type="number" min={1} value={compForm.capacity} onChange={(e) => setCompForm({ ...compForm, capacity: e.target.value })} /></div>
               <div className="space-y-2"><Label>Rules URL</Label><Input value={compForm.rules_url} onChange={(e) => setCompForm({ ...compForm, rules_url: e.target.value })} /></div>
             </div>
+            <div className="space-y-2">
+              <Label>Max venue scans per ticket</Label>
+              <Input type="number" min={0} value={compForm.max_venue_scans} onChange={(e) => setCompForm({ ...compForm, max_venue_scans: e.target.value })} />
+              <p className="text-xs text-muted-foreground">0 = unlimited re-entries. Set a number for multi-round events with a re-entry cap.</p>
+            </div>
             <Button type="submit" disabled={saving} className="rounded-full text-xs font-semibold tracking-wider">CREATE COMPETITION</Button>
           </form>
 
@@ -290,6 +355,69 @@ const AdminPanel = () => {
               <div key={c.id} className="rounded-2xl border border-border bg-card p-5">
                 <p className="font-heading font-semibold">{c.name}</p>
                 <p className="text-xs text-muted-foreground mt-1">{c.venue ?? 'Venue TBA'} · {formatDateTime(c.start_time)}</p>
+              </div>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="broadcast" className="mt-6 grid lg:grid-cols-2 gap-6">
+          <form onSubmit={sendBroadcast} className="rounded-2xl border border-border bg-card p-6 space-y-4">
+            <h2 className="font-heading text-lg font-semibold">Send an email</h2>
+            <p className="text-xs text-muted-foreground -mt-2">
+              Sent from the same no-reply address as ticket emails. Not for replies — it's a
+              one-way announcement (instructions, schedule changes, reminders, etc).
+            </p>
+            <div className="space-y-2">
+              <Label>Audience</Label>
+              <Select value={broadcastForm.audience_type} onValueChange={(v) => setBroadcastForm({ ...broadcastForm, audience_type: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all_participants">All participants</SelectItem>
+                  <SelectItem value="competition_participants">Participants of one competition</SelectItem>
+                  <SelectItem value="all_staff">All approved staff</SelectItem>
+                  <SelectItem value="custom">Custom email list</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {broadcastForm.audience_type === 'competition_participants' && (
+              <div className="space-y-2">
+                <Label>Competition</Label>
+                <Select value={broadcastForm.competition_id} onValueChange={(v) => setBroadcastForm({ ...broadcastForm, competition_id: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select competition" /></SelectTrigger>
+                  <SelectContent>{competitions.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            )}
+            {broadcastForm.audience_type === 'custom' && (
+              <div className="space-y-2">
+                <Label>Emails (comma or newline separated)</Label>
+                <Textarea rows={3} value={broadcastForm.emails} onChange={(e) => setBroadcastForm({ ...broadcastForm, emails: e.target.value })} />
+              </div>
+            )}
+            <div className="space-y-2"><Label>Subject</Label><Input required value={broadcastForm.subject} onChange={(e) => setBroadcastForm({ ...broadcastForm, subject: e.target.value })} /></div>
+            <div className="space-y-2">
+              <Label>Message</Label>
+              <Textarea required rows={8} value={broadcastForm.body} onChange={(e) => setBroadcastForm({ ...broadcastForm, body: e.target.value })} placeholder="Blank lines start a new paragraph." />
+            </div>
+            <Button type="submit" disabled={sendingBroadcast} className="rounded-full text-xs font-semibold tracking-wider">
+              {sendingBroadcast ? 'SENDING…' : 'SEND EMAIL'}
+            </Button>
+          </form>
+
+          <div className="space-y-3">
+            <h2 className="font-heading text-lg font-semibold">Recent broadcasts</h2>
+            {broadcasts.length === 0 && <p className="text-sm text-muted-foreground">Nothing sent yet.</p>}
+            {broadcasts.map((b) => (
+              <div key={b.id} className="rounded-2xl border border-border bg-card p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="font-medium text-sm">{b.subject}</p>
+                  <span className={`text-[10px] font-semibold tracking-wider uppercase shrink-0 ${b.status === 'sent' ? 'text-primary' : b.status === 'partial' ? 'text-amber-500' : 'text-destructive'}`}>
+                    {b.status}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {b.audience_type.replace('_', ' ')} · {b.recipient_count} sent{b.failed_count > 0 && `, ${b.failed_count} failed`} · {formatDateTime(b.created_at)}
+                </p>
               </div>
             ))}
           </div>

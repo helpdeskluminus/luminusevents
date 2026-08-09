@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
         .from("registrations")
         .select(`id, ticket_code, status, competition_id,
           participants ( name, email, organization ),
-          competitions ( id, name, venue )`)
+          competitions ( id, name, venue, max_venue_scans, events ( max_gate_scans ) )`)
         .eq("qr_secret_token", token)
         .maybeSingle();
       reg = data;
@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
         .from("registrations")
         .select(`id, ticket_code, status, competition_id,
           participants ( name, email, organization ),
-          competitions ( id, name, venue )`)
+          competitions ( id, name, venue, max_venue_scans, events ( max_gate_scans ) )`)
         .eq("ticket_code", ticketCode)
         .maybeSingle();
       reg = data;
@@ -73,6 +73,8 @@ Deno.serve(async (req) => {
     if (reg.status !== "confirmed") return json({ result: "denied", reason: `Ticket is ${reg.status}` });
 
     const participant = reg.participants as unknown as { name: string; email: string; organization: string | null };
+    const regCompetition = reg.competitions as unknown as { max_venue_scans: number; events: { max_gate_scans: number } | null } | null;
+    const maxScans = mode === "gate" ? (regCompetition?.events?.max_gate_scans ?? 0) : (regCompetition?.max_venue_scans ?? 0);
 
     // All competitions this participant is registered for (shown at the gate)
     const { data: allRegs } = await admin
@@ -124,8 +126,20 @@ Deno.serve(async (req) => {
       .eq("checkin_type", mode === "gate" ? "main_gate" : "venue")
       .order("scanned_at", { ascending: false });
     if (competitionId) priorQuery = priorQuery.eq("competition_id", competitionId);
-    const { data: prior } = await priorQuery.limit(1);
-    const isDuplicate = !!(prior && prior.length > 0);
+    const { data: prior } = await priorQuery;
+    const priorCount = prior?.length ?? 0;
+    const isDuplicate = priorCount > 0;
+
+    if (maxScans > 0 && priorCount >= maxScans) {
+      return json({
+        result: "denied",
+        reason: `Scan limit reached (${priorCount}/${maxScans} used)`,
+        participant: { name: participant.name, ticket_code: reg.ticket_code, organization: participant.organization },
+        scan_count: priorCount,
+        max_scans: maxScans,
+        competitions,
+      });
+    }
 
     const { error: insErr } = await admin.from("checkins").insert({
       registration_id: reg.id,
@@ -149,6 +163,8 @@ Deno.serve(async (req) => {
         organization: participant.organization,
         ticket_code: reg.ticket_code,
       },
+      scan_count: priorCount + 1,
+      max_scans: maxScans || null,
       competitions,
     });
   } catch (e) {
