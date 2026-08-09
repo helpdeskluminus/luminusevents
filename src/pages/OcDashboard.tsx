@@ -9,6 +9,7 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScanLine, CheckCircle2, Circle } from 'lucide-react';
+import { BulkUploadDialog } from '@/components/BulkUploadDialog';
 
 interface RegRow {
   id: string;
@@ -99,12 +100,15 @@ const OcPanel = () => {
         </div>
       </div>
 
-      <Input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search by name, email or ticket code"
-        className="mt-8"
-      />
+      <div className="flex flex-col sm:flex-row gap-3 mt-8">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by name, email or ticket code"
+          className="flex-1"
+        />
+        <BulkUploadDialog competitions={[]} fixedCompetitionId={competitionId} />
+      </div>
 
       <div className="rounded-2xl border border-border bg-card mt-4 overflow-hidden">
         <ul className="divide-y divide-border">

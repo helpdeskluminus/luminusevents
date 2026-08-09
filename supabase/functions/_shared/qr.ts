@@ -52,6 +52,23 @@ export async function verifyTicketToken(token: string): Promise<boolean> {
   return diff === 0;
 }
 
+/**
+ * Best-effort client IP from standard proxy headers (Supabase Edge Functions
+ * run behind a proxy that sets these). Falls back to "unknown" so rate
+ * limiting degrades to "shared bucket" rather than throwing.
+ */
+export function clientIp(req: Request): string {
+  const fwd = req.headers.get("x-forwarded-for");
+  if (fwd) return fwd.split(",")[0].trim();
+  return req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || "unknown";
+}
+
+/** Salted, non-reversible hash of an IP - never store the raw address. */
+export async function hashIp(ip: string): Promise<string> {
+  const salt = Deno.env.get("QR_HMAC_SECRET") ?? "fallback-salt";
+  return hmac(ip, salt);
+}
+
 export function generateTicketCode(): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const bytes = crypto.getRandomValues(new Uint8Array(8));

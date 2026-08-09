@@ -48,9 +48,9 @@ approve them:
 ## How the roles work
 
 - **admin** — creates events and competitions, creates Event OC /
-  Disciplinary staff logins (via the `create-staff-user` edge function,
-  which validates the caller is an admin before touching `auth.admin`),
-  sees every dashboard, can scan at either checkpoint.
+  Disciplinary / Gate Staff staff logins (via the `create-staff-user` edge
+  function, which validates the caller is an admin before touching
+  `auth.admin`), sees every dashboard, can scan at either checkpoint.
 - **event_oc** — scoped server-side to exactly one competition
   (`user_roles.competition_id`). The `scan-ticket` edge function reads this
   from the caller's own `user_roles` row — it is never taken from client
@@ -58,29 +58,40 @@ approve them:
   registrations even by tampering with requests.
 - **disciplinary** — cross-fest read access (all registrations, all
   check-ins) plus main-gate scanning authority.
-
-There's intentionally no `gate_staff` role yet — main-gate scanning
-currently requires `admin` or `disciplinary`. Worth adding if you don't want
-full-privilege accounts physically operating gate devices; see "Extending
-this" below.
+- **gate_staff** — main-gate scanning and exit-marking only, without the
+  cross-fest read access or scan-limit overrides that `disciplinary` has.
+  For a device physically sitting at the door, so it doesn't need to carry
+  full admin/disciplinary privileges. Deliberately not per-checkpoint —
+  it's always scoped to the main gate, matching how `scan-ticket` already
+  separates `mode: "gate"` from `mode: "venue"`.
 
 Participants themselves are **not** app users — they never get a password.
 A participant is just a row created by the public registration flow, keyed
 to a unique, cryptographically random `qr_secret_token` (their only
 "credential").
 
-## How check-in works
+## How check-in and occupancy work
 
 1. A participant registers for a competition (`register-participant` edge
-   function) — this creates/updates their `participants` row, creates a
-   `registrations` row with a signed QR token, and fires the ticket email.
-2. **Main gate scan** (`mode: "gate"`, admin/disciplinary only): verifies the
-   QR signature, looks up the registration, checks for a very recent
-   duplicate scan (6s debounce, to absorb a phone camera re-triggering on
-   the same code), logs the check-in.
-3. **Venue scan** (`mode: "venue"`, Event OC scoped to their own competition,
+   function, or in bulk via `bulk-register-participants` — see "CSV / bulk
+   registration" below) — this creates/updates their `participants` row,
+   creates a `registrations` row with a signed QR token, and fires the
+   ticket email.
+2. **Main gate scan** (`mode: "gate"`, admin/disciplinary/gate_staff only):
+   verifies the QR signature, looks up the registration, checks for a very
+   recent duplicate scan (6s debounce, to absorb a phone camera re-triggering
+   on the same code), logs the check-in, and marks the ticket's
+   `registrations.currently_inside = true`.
+3. **Exit marking**: gate staff mark a ticket exited from the scan result
+   card or the live gate dashboard (`mark-exit` edge function) — not by
+   scanning the QR again. This flips `currently_inside = false` and is
+   reversible (mis-taps can be undone). Live occupancy at the gate is
+   `count(registrations where currently_inside)`, which actually decreases
+   as people leave, unlike the raw cumulative entry count.
+4. **Venue scan** (`mode: "venue"`, Event OC scoped to their own competition,
    or admin): same verification, plus confirms the ticket is actually
-   registered for *that* competition before logging it.
+   registered for *that* competition before logging it. Venue scans don't
+   affect gate occupancy.
 
 Both write to a single `checkins` table — every dashboard (Admin/OC/DC) is
 just a filtered, RLS-scoped read over that same table via Supabase Realtime,
@@ -130,13 +141,40 @@ won't receive a ticket, so confirm this secret is set before go-live.
 
 ## CSV / bulk registration
 
-Not currently implemented as bulk upload — registration happens one
-participant at a time via `register-participant`. Worth adding if you need
-to pre-load a roster instead of relying on self-registration.
+Admins can bulk-register a roster from a CSV (name + email required; phone
+and organization optional) via the "Bulk CSV upload" button on the
+Competitions tab; Event OCs get the same tool scoped to their own
+competition from their dashboard. Under the hood it's the
+`bulk-register-participants` edge function, which runs the same
+upsert-participant + create-registration + send-ticket-email logic as the
+public flow, just looped over up to 500 rows per request, with per-row
+success/duplicate/error results returned so you can see exactly which rows
+failed and why. Ticket emails can be turned off per-upload if you'd rather
+notify people separately.
+
+## In-app password change
+
+Staff can change their own password from the navbar (no need to go through
+the email reset-link flow) — it re-confirms the current password before
+calling Supabase's `updateUser`, so a session left open on a shared device
+can't be used to silently take over the account.
+
+## Public registration rate limiting
+
+`register-participant` is intentionally public and unauthenticated (anyone
+with a competition link can register), so it rate-limits by a salted hash of
+the client IP rather than raw IP storage: 5 attempts/minute and 20/hour per
+IP, tracked in `registration_attempts`. Tune the limits in
+`supabase/functions/register-participant/index.ts` if your fest's traffic
+pattern needs different numbers.
 
 ## Extending this
 
-- Add a `gate_staff` role scoped to a single checkpoint, separate from full
-  `admin`/`disciplinary` privileges.
-- Bulk CSV participant upload for pre-registered rosters.
-- Exit scans / occupancy tracking, rather than cumulative check-in counts.
+- Per-checkpoint gate roles, if `gate_staff` being main-gate-only ever stops
+  being enough (e.g. multiple physical entrances that should be scoped
+  separately, the way Event OC is scoped per competition).
+- Rate limiting is IP-based today; consider adding a CAPTCHA or per-email
+  cooldown too if a determined abuser rotates IPs.
+- Bulk CSV upload fires ticket emails synchronously per row inside the edge
+  function's execution window — for very large rosters (hundreds+), consider
+  batching into multiple smaller uploads or moving email sends to a queue.

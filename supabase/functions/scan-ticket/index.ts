@@ -1,5 +1,5 @@
 // Verifies a scanned ticket QR server-side and records a check-in.
-// Roles: 'disciplinary' -> main_gate, 'event_oc' -> venue (locked to their competition), 'admin' -> both.
+// Roles: 'disciplinary'/'gate_staff' -> main_gate, 'event_oc' -> venue (locked to their competition), 'admin' -> both.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders, json, verifyTicketToken } from "../_shared/qr.ts";
 
@@ -35,9 +35,10 @@ Deno.serve(async (req) => {
     const roleList = (roles ?? []) as { role: string; competition_id: string | null }[];
     const isAdmin = roleList.some((r) => r.role === "admin");
     const isDisciplinary = roleList.some((r) => r.role === "disciplinary");
+    const isGateStaff = roleList.some((r) => r.role === "gate_staff");
     const ocRole = roleList.find((r) => r.role === "event_oc");
 
-    if (mode === "gate" && !(isAdmin || isDisciplinary)) return json({ error: "Not authorised for the main gate" }, 403);
+    if (mode === "gate" && !(isAdmin || isDisciplinary || isGateStaff)) return json({ error: "Not authorised for the main gate" }, 403);
     if (mode === "venue" && !(isAdmin || ocRole)) return json({ error: "Not authorised for venue scanning" }, 403);
 
     // ---- Ticket lookup ----
@@ -115,6 +116,7 @@ Deno.serve(async (req) => {
         result: "debounced",
         reason: "Just scanned - ignoring rapid re-scan",
         participant: { name: participant.name, ticket_code: reg.ticket_code, organization: participant.organization },
+        registration_id: reg.id,
         competitions,
       });
     }
@@ -154,6 +156,20 @@ Deno.serve(async (req) => {
       return json({ error: "Could not record check-in" }, 500);
     }
 
+    // Gate scans drive live occupancy: mark this ticket as currently inside.
+    // (Exiting is a manual mark by gate staff, not a second scan - see
+    // mark-exit.) Venue scans don't touch this - occupancy is a main-gate
+    // concept, one entry per participant regardless of how many competitions
+    // they're registered for.
+    let currentlyInside: boolean | null = null;
+    if (mode === "gate") {
+      await admin
+        .from("registrations")
+        .update({ currently_inside: true, last_entry_at: new Date().toISOString() })
+        .eq("id", reg.id);
+      currentlyInside = true;
+    }
+
     return json({
       result: isDuplicate ? "duplicate" : "success",
       reason: isDuplicate ? `Already checked in at ${prior![0].scanned_at}` : null,
@@ -163,6 +179,8 @@ Deno.serve(async (req) => {
         organization: participant.organization,
         ticket_code: reg.ticket_code,
       },
+      registration_id: reg.id,
+      currently_inside: currentlyInside,
       scan_count: priorCount + 1,
       max_scans: maxScans || null,
       competitions,

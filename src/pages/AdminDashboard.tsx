@@ -7,14 +7,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { Helmet } from 'react-helmet-async';
 import { formatDateTime } from '@/lib/format';
 import { Trash2, Sparkles, Upload } from 'lucide-react';
+import { BulkUploadDialog } from '@/components/BulkUploadDialog';
 
-interface EventRow { id: string; name: string; description: string | null; banner_url: string | null; start_date: string | null; end_date: string | null }
-interface CompetitionRow { id: string; event_id: string; name: string; venue: string | null; start_time: string | null; capacity: number | null }
+interface EventRow { id: string; name: string; description: string | null; banner_url: string | null; start_date: string | null; end_date: string | null; max_gate_scans?: number }
+interface CompetitionRow { id: string; event_id: string; name: string; description?: string | null; poster_url?: string | null; venue: string | null; start_time: string | null; end_time?: string | null; capacity: number | null; rules_url?: string | null; max_venue_scans?: number }
 interface StaffRow { user_id: string; role: string; competition_id: string | null; profiles: { full_name: string; email: string | null; position: string | null } | null }
 interface PendingRow { id: string; full_name: string; email: string | null; created_at: string }
 interface Stats { gate: number; registrations: number; perCompetition: Record<string, number> }
@@ -43,6 +45,10 @@ const AdminPanel = () => {
   const [broadcasts, setBroadcasts] = useState<BroadcastRow[]>([]);
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<EventRow | null>(null);
+  const [editEventForm, setEditEventForm] = useState(emptyEvent);
+  const [editingComp, setEditingComp] = useState<CompetitionRow | null>(null);
+  const [editCompForm, setEditCompForm] = useState(emptyComp);
 
   const [eventExtracting, setEventExtracting] = useState(false);
   const [compExtracting, setCompExtracting] = useState(false);
@@ -91,7 +97,7 @@ const AdminPanel = () => {
   const loadStructure = useCallback(async () => {
     const [{ data: ev }, { data: comps }, { data: roles }, { data: profs }] = await Promise.all([
       supabase.from('events').select('*').order('created_at', { ascending: false }),
-      supabase.from('competitions').select('id, event_id, name, venue, start_time, capacity').order('start_time'),
+      supabase.from('competitions').select('*').order('start_time'),
       supabase.from('user_roles').select('user_id, role, competition_id'),
       supabase.from('profiles').select('id, full_name, email, position'),
     ]);
@@ -175,6 +181,78 @@ const AdminPanel = () => {
     if (error) return toast.error(error.message);
     toast.success('Competition created');
     setCompForm({ ...emptyComp, event_id: compForm.event_id });
+    void loadStructure();
+  };
+
+  const openEditEvent = (ev: EventRow) => {
+    setEditingEvent(ev);
+    setEditEventForm({
+      name: ev.name,
+      description: ev.description ?? '',
+      banner_url: ev.banner_url ?? '',
+      start_date: ev.start_date ? ev.start_date.slice(0, 10) : '',
+      end_date: ev.end_date ? ev.end_date.slice(0, 10) : '',
+      max_gate_scans: String(ev.max_gate_scans ?? 0),
+    });
+  };
+
+  const saveEditEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEvent) return;
+    setSaving(true);
+    const { error } = await supabase.from('events').update({
+      name: editEventForm.name.trim(),
+      description: editEventForm.description.trim() || null,
+      banner_url: editEventForm.banner_url.trim() || null,
+      start_date: editEventForm.start_date || null,
+      end_date: editEventForm.end_date || null,
+      max_gate_scans: Math.max(0, Number(editEventForm.max_gate_scans) || 0),
+    }).eq('id', editingEvent.id);
+    setSaving(false);
+    if (error) return toast.error(error.message);
+    toast.success('Event updated');
+    setEditingEvent(null);
+    void loadStructure();
+  };
+
+  const toDatetimeLocal = (v: string | null | undefined) => (v ? new Date(v).toISOString().slice(0, 16) : '');
+
+  const openEditComp = (c: CompetitionRow) => {
+    setEditingComp(c);
+    setEditCompForm({
+      event_id: c.event_id,
+      name: c.name,
+      description: c.description ?? '',
+      poster_url: c.poster_url ?? '',
+      venue: c.venue ?? '',
+      start_time: toDatetimeLocal(c.start_time),
+      end_time: toDatetimeLocal(c.end_time),
+      capacity: c.capacity ? String(c.capacity) : '',
+      rules_url: c.rules_url ?? '',
+      max_venue_scans: String(c.max_venue_scans ?? 0),
+    });
+  };
+
+  const saveEditComp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingComp) return;
+    setSaving(true);
+    const { error } = await supabase.from('competitions').update({
+      event_id: editCompForm.event_id,
+      name: editCompForm.name.trim(),
+      description: editCompForm.description.trim() || null,
+      poster_url: editCompForm.poster_url.trim() || null,
+      venue: editCompForm.venue.trim() || null,
+      start_time: editCompForm.start_time || null,
+      end_time: editCompForm.end_time || null,
+      capacity: editCompForm.capacity ? Number(editCompForm.capacity) : null,
+      rules_url: editCompForm.rules_url.trim() || null,
+      max_venue_scans: Math.max(0, Number(editCompForm.max_venue_scans) || 0),
+    }).eq('id', editingComp.id);
+    setSaving(false);
+    if (error) return toast.error(error.message);
+    toast.success('Competition updated');
+    setEditingComp(null);
     void loadStructure();
   };
 
@@ -383,12 +461,35 @@ const AdminPanel = () => {
 
           <div className="space-y-3">
             {events.map((ev) => (
-              <div key={ev.id} className="rounded-2xl border border-border bg-card p-5">
-                <p className="font-heading font-semibold">{ev.name}</p>
-                <p className="text-xs text-muted-foreground mt-1">{ev.start_date ?? 'No dates set'}</p>
+              <div key={ev.id} className="rounded-2xl border border-border bg-card p-5 flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-heading font-semibold">{ev.name}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{ev.start_date ?? 'No dates set'}</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => openEditEvent(ev)} className="rounded-full text-[10px] font-semibold tracking-wider shrink-0">EDIT</Button>
               </div>
             ))}
           </div>
+
+          <Dialog open={!!editingEvent} onOpenChange={(v) => { if (!v) setEditingEvent(null); }}>
+            <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+              <DialogHeader><DialogTitle>Edit event</DialogTitle></DialogHeader>
+              <form onSubmit={saveEditEvent} className="space-y-4">
+                <div className="space-y-2"><Label>Name</Label><Input required value={editEventForm.name} onChange={(e) => setEditEventForm({ ...editEventForm, name: e.target.value })} /></div>
+                <div className="space-y-2"><Label>Description</Label><Textarea value={editEventForm.description} onChange={(e) => setEditEventForm({ ...editEventForm, description: e.target.value })} /></div>
+                <div className="space-y-2"><Label>Banner image URL</Label><Input value={editEventForm.banner_url} onChange={(e) => setEditEventForm({ ...editEventForm, banner_url: e.target.value })} /></div>
+                <div className="space-y-2">
+                  <Label>Max main-gate scans per ticket</Label>
+                  <Input type="number" min={0} value={editEventForm.max_gate_scans} onChange={(e) => setEditEventForm({ ...editEventForm, max_gate_scans: e.target.value })} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2"><Label>Start</Label><Input type="date" value={editEventForm.start_date} onChange={(e) => setEditEventForm({ ...editEventForm, start_date: e.target.value })} /></div>
+                  <div className="space-y-2"><Label>End</Label><Input type="date" value={editEventForm.end_date} onChange={(e) => setEditEventForm({ ...editEventForm, end_date: e.target.value })} /></div>
+                </div>
+                <Button type="submit" disabled={saving} className="w-full rounded-full text-xs font-semibold tracking-wider">SAVE CHANGES</Button>
+              </form>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         <TabsContent value="competitions" className="mt-6 grid lg:grid-cols-2 gap-6">
@@ -453,13 +554,51 @@ const AdminPanel = () => {
           </form>
 
           <div className="space-y-3">
+            <div className="flex justify-end">
+              <BulkUploadDialog competitions={competitions.map((c) => ({ id: c.id, name: c.name }))} />
+            </div>
             {competitions.map((c) => (
-              <div key={c.id} className="rounded-2xl border border-border bg-card p-5">
-                <p className="font-heading font-semibold">{c.name}</p>
-                <p className="text-xs text-muted-foreground mt-1">{c.venue ?? 'Venue TBA'} · {formatDateTime(c.start_time)}</p>
+              <div key={c.id} className="rounded-2xl border border-border bg-card p-5 flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-heading font-semibold">{c.name}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{c.venue ?? 'Venue TBA'} · {formatDateTime(c.start_time)}</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => openEditComp(c)} className="rounded-full text-[10px] font-semibold tracking-wider shrink-0">EDIT</Button>
               </div>
             ))}
           </div>
+
+          <Dialog open={!!editingComp} onOpenChange={(v) => { if (!v) setEditingComp(null); }}>
+            <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
+              <DialogHeader><DialogTitle>Edit competition</DialogTitle></DialogHeader>
+              <form onSubmit={saveEditComp} className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Event</Label>
+                  <Select value={editCompForm.event_id} onValueChange={(v) => setEditCompForm({ ...editCompForm, event_id: v })}>
+                    <SelectTrigger><SelectValue placeholder="Select event" /></SelectTrigger>
+                    <SelectContent>{events.map((ev) => <SelectItem key={ev.id} value={ev.id}>{ev.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2"><Label>Name</Label><Input required value={editCompForm.name} onChange={(e) => setEditCompForm({ ...editCompForm, name: e.target.value })} /></div>
+                <div className="space-y-2"><Label>Description</Label><Textarea value={editCompForm.description} onChange={(e) => setEditCompForm({ ...editCompForm, description: e.target.value })} /></div>
+                <div className="space-y-2"><Label>Poster image URL</Label><Input value={editCompForm.poster_url} onChange={(e) => setEditCompForm({ ...editCompForm, poster_url: e.target.value })} /></div>
+                <div className="space-y-2"><Label>Venue</Label><Input value={editCompForm.venue} onChange={(e) => setEditCompForm({ ...editCompForm, venue: e.target.value })} /></div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2"><Label>Start</Label><Input type="datetime-local" value={editCompForm.start_time} onChange={(e) => setEditCompForm({ ...editCompForm, start_time: e.target.value })} /></div>
+                  <div className="space-y-2"><Label>End</Label><Input type="datetime-local" value={editCompForm.end_time} onChange={(e) => setEditCompForm({ ...editCompForm, end_time: e.target.value })} /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2"><Label>Capacity</Label><Input type="number" min={1} value={editCompForm.capacity} onChange={(e) => setEditCompForm({ ...editCompForm, capacity: e.target.value })} /></div>
+                  <div className="space-y-2"><Label>Rules URL</Label><Input value={editCompForm.rules_url} onChange={(e) => setEditCompForm({ ...editCompForm, rules_url: e.target.value })} /></div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Max venue scans per ticket</Label>
+                  <Input type="number" min={0} value={editCompForm.max_venue_scans} onChange={(e) => setEditCompForm({ ...editCompForm, max_venue_scans: e.target.value })} />
+                </div>
+                <Button type="submit" disabled={saving} className="w-full rounded-full text-xs font-semibold tracking-wider">SAVE CHANGES</Button>
+              </form>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         <TabsContent value="broadcast" className="mt-6 grid lg:grid-cols-2 gap-6">
@@ -549,6 +688,7 @@ const AdminPanel = () => {
                       <Select value={role} onValueChange={(v) => setPendingRole({ ...pendingRole, [p.id]: v })}>
                         <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="gate_staff">Gate Staff (main gate only)</SelectItem>
                           <SelectItem value="disciplinary">Disciplinary (main gate)</SelectItem>
                           <SelectItem value="event_oc">Event OC (one competition)</SelectItem>
                           <SelectItem value="admin">Admin</SelectItem>
@@ -586,6 +726,7 @@ const AdminPanel = () => {
               <Select value={staffForm.role} onValueChange={(v) => setStaffForm({ ...staffForm, role: v })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="gate_staff">Gate Staff (main gate only)</SelectItem>
                   <SelectItem value="disciplinary">Disciplinary (main gate)</SelectItem>
                   <SelectItem value="event_oc">Event OC (one competition)</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>

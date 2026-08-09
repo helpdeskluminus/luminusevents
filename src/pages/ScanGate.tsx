@@ -15,6 +15,7 @@ const GateScanner = () => {
   const [current, setCurrent] = useState<ScanResult | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [busy, setBusy] = useState(false);
+  const [exitBusy, setExitBusy] = useState(false);
   const lastToken = useRef<{ token: string; at: number }>({ token: '', at: 0 });
 
   const handleScan = useCallback(async (token: string) => {
@@ -48,23 +49,36 @@ const GateScanner = () => {
     setLog((prev) => [{ ...payload, at: new Date().toISOString() }, ...prev].slice(0, 25));
   }, []);
 
+  const handleMarkExit = useCallback(async (registrationId: string) => {
+    setExitBusy(true);
+    const wasInside = current?.currently_inside !== false;
+    const { data, error } = await supabase.functions.invoke('mark-exit', {
+      body: { registration_id: registrationId, action: wasInside ? 'exit' : 'reentry' },
+    });
+    setExitBusy(false);
+    const payload = data as { error?: string; currently_inside?: boolean } | null;
+    if (error || payload?.error) return toast.error(payload?.error ?? 'Could not update status');
+    toast.success(wasInside ? 'Marked as exited' : 'Marked as re-entered');
+    setCurrent((c) => (c ? { ...c, currently_inside: payload?.currently_inside ?? !wasInside } : c));
+  }, [current]);
+
   return (
     <main className="max-w-5xl mx-auto px-6 py-10">
       <Helmet>
         <title>Main Gate Scanner | Techfest Check-in</title>
-        <meta name="description" content="Disciplinary main gate QR scanner for techfest entry verification." />
+        <meta name="description" content="Gate staff QR scanner for techfest entry and exit verification." />
       </Helmet>
 
       <p className="text-xs font-semibold tracking-[0.2em] text-primary uppercase">Main gate</p>
       <h1 className="font-heading text-3xl font-bold tracking-tight mt-1">Entry scanner</h1>
-      <p className="mt-2 text-sm text-muted-foreground">Scan a participant's ticket QR to record fest entry.</p>
+      <p className="mt-2 text-sm text-muted-foreground">Scan a participant's ticket QR to record fest entry, or mark them exited below.</p>
 
       <div className="grid lg:grid-cols-2 gap-8 mt-8">
         <QrScanner onScan={handleScan} paused={busy} />
 
         <div className="space-y-5">
           {current ? (
-            <ScanResultCard result={current} showCompetitions />
+            <ScanResultCard result={current} showCompetitions onMarkExit={handleMarkExit} markExitBusy={exitBusy} />
           ) : (
             <div className="rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
               Scan results will appear here.
@@ -98,7 +112,7 @@ const GateScanner = () => {
 };
 
 const ScanGate = () => (
-  <RequireRole roles={['disciplinary', 'admin']}>
+  <RequireRole roles={['disciplinary', 'admin', 'gate_staff']}>
     <GateScanner />
   </RequireRole>
 );

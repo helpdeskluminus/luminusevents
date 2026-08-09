@@ -1,4 +1,5 @@
-import { CheckCircle2, XCircle, AlertTriangle, Clock } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertTriangle, Clock, LogOut, LogIn } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 export interface ScanResult {
   result: 'success' | 'duplicate' | 'denied' | 'debounced';
@@ -7,6 +8,8 @@ export interface ScanResult {
   competitions?: { name: string; venue: string | null; start_time: string | null }[];
   scan_count?: number | null;
   max_scans?: number | null;
+  registration_id?: string | null;
+  currently_inside?: boolean | null;
 }
 
 const STYLES = {
@@ -16,7 +19,15 @@ const STYLES = {
   denied: { icon: XCircle, cls: 'border-destructive bg-destructive/5 text-destructive', label: 'DENIED' },
 } as const;
 
-export const ScanResultCard = ({ result, showCompetitions }: { result: ScanResult; showCompetitions?: boolean }) => {
+interface ScanResultCardProps {
+  result: ScanResult;
+  showCompetitions?: boolean;
+  /** Gate-only: lets the scanning staff mark this ticket exited right from the result. */
+  onMarkExit?: (registrationId: string) => void;
+  markExitBusy?: boolean;
+}
+
+export const ScanResultCard = ({ result, showCompetitions, onMarkExit, markExitBusy }: ScanResultCardProps) => {
   const style = STYLES[result.result] ?? STYLES.denied;
   const Icon = style.icon;
 
@@ -41,6 +52,18 @@ export const ScanResultCard = ({ result, showCompetitions }: { result: ScanResul
         <p className="mt-1 text-xs font-semibold tracking-wide text-muted-foreground">
           SCAN {Math.min(result.scan_count ?? 0, result.max_scans)} OF {result.max_scans}
         </p>
+      )}
+
+      {onMarkExit && result.registration_id && (result.result === 'success' || result.result === 'duplicate' || result.result === 'debounced') && (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={markExitBusy}
+          onClick={() => onMarkExit(result.registration_id!)}
+          className="mt-4 rounded-full text-[10px] font-semibold tracking-wider border-current"
+        >
+          {result.currently_inside === false ? <><LogIn className="h-3.5 w-3.5 mr-1" /> MARK RE-ENTRY</> : <><LogOut className="h-3.5 w-3.5 mr-1" /> MARK EXIT</>}
+        </Button>
       )}
 
       {showCompetitions && result.competitions && result.competitions.length > 0 && (

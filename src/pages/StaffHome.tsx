@@ -5,6 +5,7 @@ const DEST: Record<string, string> = {
   admin: '/admin',
   disciplinary: '/gate',
   event_oc: '/oc',
+  gate_staff: '/gate',
 };
 
 const StaffHome = () => {

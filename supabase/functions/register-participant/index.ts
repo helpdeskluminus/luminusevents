@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders, json, signTicketToken, generateTicketCode } from "../_shared/qr.ts";
+import { corsHeaders, json, signTicketToken, generateTicketCode, clientIp, hashIp } from "../_shared/qr.ts";
 
 interface Body {
   competition_id?: string;
@@ -11,10 +11,43 @@ interface Body {
 
 const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 
+// This is a public, unauthenticated endpoint (anyone with the competition link
+// can hit it), so it needs its own abuse protection rather than relying on
+// Supabase auth. Two windows: a tight one to stop rapid-fire bot submissions,
+// a looser one to stop someone quietly registering hundreds of fake entries
+// over a longer period from the same IP.
+const RATE_LIMITS = [
+  { windowSeconds: 60, max: 5 },
+  { windowSeconds: 3600, max: 20 },
+];
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+    const ipHash = await hashIp(clientIp(req));
+    const now = Date.now();
+    const widestWindow = Math.max(...RATE_LIMITS.map((r) => r.windowSeconds));
+    const { data: recentAttempts } = await admin
+      .from("registration_attempts")
+      .select("created_at")
+      .eq("ip_hash", ipHash)
+      .gte("created_at", new Date(now - widestWindow * 1000).toISOString());
+
+    for (const limit of RATE_LIMITS) {
+      const cutoff = now - limit.windowSeconds * 1000;
+      const count = (recentAttempts ?? []).filter((a) => new Date((a as { created_at: string }).created_at).getTime() >= cutoff).length;
+      if (count >= limit.max) {
+        return json({ error: "Too many registration attempts from this connection. Please wait a bit and try again." }, 429);
+      }
+    }
+
+    // Record this attempt before doing any work, so a flood of invalid
+    // requests is throttled too, not just successful registrations.
+    await admin.from("registration_attempts").insert({ ip_hash: ipHash });
+
     const body = (await req.json()) as Body;
     const name = (body.name || "").trim();
     const email = (body.email || "").trim().toLowerCase();
@@ -29,8 +62,6 @@ Deno.serve(async (req) => {
     if (organization.length > 160) errors.push("College/organisation is too long");
     if (!/^[0-9a-f-]{36}$/i.test(competitionId)) errors.push("A competition must be selected");
     if (errors.length) return json({ error: errors.join(". ") }, 400);
-
-    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
     const { data: competition } = await admin
       .from("competitions")

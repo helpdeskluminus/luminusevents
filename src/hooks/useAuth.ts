@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { User } from '@supabase/supabase-js';
 
-export type AppRole = 'admin' | 'disciplinary' | 'event_oc';
+export type AppRole = 'admin' | 'disciplinary' | 'event_oc' | 'gate_staff';
 
 export interface StaffProfile {
   id: string;
@@ -77,6 +77,7 @@ export function useAuth() {
     isAdmin: profile?.role === 'admin',
     isDisciplinary: profile?.role === 'disciplinary',
     isEventOC: profile?.role === 'event_oc',
+    isGateStaff: profile?.role === 'gate_staff',
     refreshProfile: () => (user ? fetchProfile(user) : null),
   };
 }

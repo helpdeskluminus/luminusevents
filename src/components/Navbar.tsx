@@ -1,5 +1,6 @@
 import type { StaffProfile } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
+import { ChangePasswordDialog } from '@/components/ChangePasswordDialog';
 import { LogOut, User } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -20,6 +21,10 @@ const NAV: Record<string, { label: string; path: string }[]> = {
   event_oc: [
     { label: 'MY COMPETITION', path: '/oc' },
     { label: 'SCAN', path: '/scan/venue' },
+  ],
+  gate_staff: [
+    { label: 'LIVE GATE', path: '/gate' },
+    { label: 'SCAN', path: '/scan/gate' },
   ],
 };
 
@@ -61,6 +66,7 @@ export const Navbar = ({ profile, onSignOut }: NavbarProps) => {
               {(profile.role ?? 'none').replace('_', ' ')}
             </span>
           </div>
+          <ChangePasswordDialog />
           <Button
             variant="outline"
             size="sm"
