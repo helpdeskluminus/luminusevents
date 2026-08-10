@@ -75,7 +75,9 @@ export type Database = {
           name: string
           poster_url: string | null
           rules_url: string | null
+          session_type: string
           start_time: string | null
+          type_label: string | null
           updated_at: string
           venue: string | null
         }
@@ -91,7 +93,9 @@ export type Database = {
           name: string
           poster_url?: string | null
           rules_url?: string | null
+          session_type?: string
           start_time?: string | null
+          type_label?: string | null
           updated_at?: string
           venue?: string | null
         }
@@ -107,7 +111,9 @@ export type Database = {
           name?: string
           poster_url?: string | null
           rules_url?: string | null
+          session_type?: string
           start_time?: string | null
+          type_label?: string | null
           updated_at?: string
           venue?: string | null
         }

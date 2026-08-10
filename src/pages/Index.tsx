@@ -5,6 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { CalendarDays, MapPin, Ticket, ArrowRight } from 'lucide-react';
 import { formatDateTime } from '@/lib/format';
+import { sessionTypeLabel, sessionTypeStyle } from '@/lib/sessionType';
 
 interface CompetitionRow {
   id: string;
@@ -14,6 +15,8 @@ interface CompetitionRow {
   venue: string | null;
   start_time: string | null;
   end_time: string | null;
+  session_type: string;
+  type_label: string | null;
   events: { name: string } | null;
 }
 
@@ -24,7 +27,7 @@ const Index = () => {
   useEffect(() => {
     supabase
       .from('competitions')
-      .select('id, name, description, poster_url, venue, start_time, end_time, events(name)')
+      .select('id, name, description, poster_url, venue, start_time, end_time, session_type, type_label, events(name)')
       .order('start_time', { ascending: true })
       .then(({ data }) => {
         setCompetitions((data as unknown as CompetitionRow[]) ?? []);
@@ -35,8 +38,8 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background">
       <Helmet>
-        <title>Techfest Competitions — Register & Get Your QR Ticket</title>
-        <meta name="description" content="Browse every techfest competition, register in seconds and receive a QR entry ticket by email for the main gate and the venue." />
+        <title>Techfest Schedule — Register & Get Your QR Ticket</title>
+        <meta name="description" content="Browse every techfest competition, workshop and webinar, register in seconds and receive a QR entry ticket by email for the main gate and the venue." />
         <link rel="canonical" href="/" />
       </Helmet>
 
@@ -59,17 +62,17 @@ const Index = () => {
       <section className="max-w-6xl mx-auto px-6 pt-16 pb-10">
         <p className="text-xs font-semibold tracking-[0.2em] text-primary uppercase mb-4">Entry by QR ticket</p>
         <h1 className="font-heading text-4xl sm:text-6xl font-bold tracking-tight leading-[1.05] max-w-3xl">
-          Every competition. <span className="text-gradient">One ticket.</span>
+          Every session. <span className="text-gradient">One ticket.</span>
         </h1>
         <p className="mt-5 text-muted-foreground max-w-xl leading-relaxed">
-          Pick a competition, register with your details, and we'll email you a signed QR ticket.
-          Show it at the main gate and again at the venue entrance.
+          Competitions, workshops, webinars — pick one, register with your details, and we'll
+          email you a signed QR ticket. Show it at the main gate and again at the venue entrance.
         </p>
       </section>
 
       <main className="max-w-6xl mx-auto px-6 pb-24">
         <h2 className="font-heading text-sm font-semibold tracking-[0.2em] uppercase text-muted-foreground mb-6">
-          Competitions
+          Schedule
         </h2>
 
         {loading ? (
@@ -81,7 +84,7 @@ const Index = () => {
         ) : competitions.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border p-16 text-center">
             <Ticket className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
-            <p className="text-sm text-muted-foreground">No competitions have been published yet. Check back soon.</p>
+            <p className="text-sm text-muted-foreground">Nothing has been published yet. Check back soon.</p>
           </div>
         ) : (
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -91,7 +94,7 @@ const Index = () => {
                   {c.poster_url ? (
                     <img
                       src={c.poster_url}
-                      alt={`${c.name} competition poster`}
+                      alt={`${c.name} poster`}
                       loading="lazy"
                       className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-500"
                     />
@@ -102,9 +105,14 @@ const Index = () => {
                   )}
                 </div>
                 <div className="p-5 flex flex-col flex-1">
-                  {c.events?.name && (
-                    <p className="text-[10px] font-semibold tracking-[0.18em] uppercase text-primary mb-1.5">{c.events.name}</p>
-                  )}
+                  <div className="flex items-center gap-2 mb-1.5">
+                    {c.events?.name && (
+                      <p className="text-[10px] font-semibold tracking-[0.18em] uppercase text-primary">{c.events.name}</p>
+                    )}
+                    <span className={`text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full ${sessionTypeStyle(c.session_type).badgeClass}`}>
+                      {sessionTypeLabel(c.session_type, c.type_label)}
+                    </span>
+                  </div>
                   <h3 className="font-heading text-lg font-semibold leading-tight">{c.name}</h3>
                   {c.description && (
                     <p className="mt-2 text-sm text-muted-foreground line-clamp-3 leading-relaxed">{c.description}</p>

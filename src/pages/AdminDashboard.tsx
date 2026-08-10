@@ -14,15 +14,16 @@ import { Helmet } from 'react-helmet-async';
 import { formatDateTime } from '@/lib/format';
 import { Trash2, Sparkles, Upload } from 'lucide-react';
 import { BulkUploadDialog } from '@/components/BulkUploadDialog';
+import { SESSION_TYPES, sessionTypeLabel } from '@/lib/sessionType';
 
 interface EventRow { id: string; name: string; description: string | null; banner_url: string | null; start_date: string | null; end_date: string | null; max_gate_scans?: number }
-interface CompetitionRow { id: string; event_id: string; name: string; description?: string | null; poster_url?: string | null; venue: string | null; start_time: string | null; end_time?: string | null; capacity: number | null; rules_url?: string | null; max_venue_scans?: number }
+interface CompetitionRow { id: string; event_id: string; name: string; description?: string | null; poster_url?: string | null; venue: string | null; start_time: string | null; end_time?: string | null; capacity: number | null; rules_url?: string | null; max_venue_scans?: number; session_type?: string; type_label?: string | null }
 interface StaffRow { user_id: string; role: string; competition_id: string | null; profiles: { full_name: string; email: string | null; position: string | null } | null }
 interface PendingRow { id: string; full_name: string; email: string | null; created_at: string }
 interface Stats { gate: number; registrations: number; perCompetition: Record<string, number> }
 
 const emptyEvent = { name: '', description: '', banner_url: '', start_date: '', end_date: '', max_gate_scans: '0' };
-const emptyComp = { event_id: '', name: '', description: '', poster_url: '', venue: '', start_time: '', end_time: '', capacity: '', rules_url: '', max_venue_scans: '0' };
+const emptyComp = { event_id: '', name: '', description: '', poster_url: '', venue: '', start_time: '', end_time: '', capacity: '', rules_url: '', max_venue_scans: '0', session_type: 'competition', type_label: '' };
 const emptyStaff = { full_name: '', email: '', password: '', role: 'disciplinary', competition_id: '', position: '' };
 const emptyBroadcast = { subject: '', body: '', audience_type: 'all_participants', competition_id: '', emails: '' };
 
@@ -176,6 +177,8 @@ const AdminPanel = () => {
       capacity: compForm.capacity ? Number(compForm.capacity) : null,
       rules_url: compForm.rules_url.trim() || null,
       max_venue_scans: Math.max(0, Number(compForm.max_venue_scans) || 0),
+      session_type: compForm.session_type,
+      type_label: compForm.session_type === 'other' ? (compForm.type_label.trim() || null) : null,
     });
     setSaving(false);
     if (error) return toast.error(error.message);
@@ -230,6 +233,8 @@ const AdminPanel = () => {
       capacity: c.capacity ? String(c.capacity) : '',
       rules_url: c.rules_url ?? '',
       max_venue_scans: String(c.max_venue_scans ?? 0),
+      session_type: c.session_type ?? 'competition',
+      type_label: c.type_label ?? '',
     });
   };
 
@@ -248,6 +253,8 @@ const AdminPanel = () => {
       capacity: editCompForm.capacity ? Number(editCompForm.capacity) : null,
       rules_url: editCompForm.rules_url.trim() || null,
       max_venue_scans: Math.max(0, Number(editCompForm.max_venue_scans) || 0),
+      session_type: editCompForm.session_type,
+      type_label: editCompForm.session_type === 'other' ? (editCompForm.type_label.trim() || null) : null,
     }).eq('id', editingComp.id);
     setSaving(false);
     if (error) return toast.error(error.message);
@@ -503,6 +510,21 @@ const AdminPanel = () => {
               </Select>
             </div>
             <div className="space-y-2"><Label>Name</Label><Input required value={compForm.name} onChange={(e) => setCompForm({ ...compForm, name: e.target.value })} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <Select value={compForm.session_type} onValueChange={(v) => setCompForm({ ...compForm, session_type: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{SESSION_TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              {compForm.session_type === 'other' && (
+                <div className="space-y-2">
+                  <Label>Custom label</Label>
+                  <Input placeholder="e.g. Panel Discussion" value={compForm.type_label} onChange={(e) => setCompForm({ ...compForm, type_label: e.target.value })} />
+                </div>
+              )}
+            </div>
             <div className="space-y-2"><Label>Description</Label><Textarea value={compForm.description} onChange={(e) => setCompForm({ ...compForm, description: e.target.value })} /></div>
             <div className="space-y-2"><Label>Poster image URL</Label><Input value={compForm.poster_url} onChange={(e) => setCompForm({ ...compForm, poster_url: e.target.value })} /></div>
             <div className="space-y-2">
@@ -543,7 +565,7 @@ const AdminPanel = () => {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2"><Label>Capacity</Label><Input type="number" min={1} value={compForm.capacity} onChange={(e) => setCompForm({ ...compForm, capacity: e.target.value })} /></div>
-              <div className="space-y-2"><Label>Rules URL</Label><Input value={compForm.rules_url} onChange={(e) => setCompForm({ ...compForm, rules_url: e.target.value })} /></div>
+              <div className="space-y-2"><Label>Resource link (rules / agenda / slides)</Label><Input value={compForm.rules_url} onChange={(e) => setCompForm({ ...compForm, rules_url: e.target.value })} /></div>
             </div>
             <div className="space-y-2">
               <Label>Max venue scans per ticket</Label>
@@ -560,7 +582,12 @@ const AdminPanel = () => {
             {competitions.map((c) => (
               <div key={c.id} className="rounded-2xl border border-border bg-card p-5 flex items-start justify-between gap-3">
                 <div>
-                  <p className="font-heading font-semibold">{c.name}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-heading font-semibold">{c.name}</p>
+                    <span className="text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                      {sessionTypeLabel(c.session_type, c.type_label)}
+                    </span>
+                  </div>
                   <p className="text-xs text-muted-foreground mt-1">{c.venue ?? 'Venue TBA'} · {formatDateTime(c.start_time)}</p>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => openEditComp(c)} className="rounded-full text-[10px] font-semibold tracking-wider shrink-0">EDIT</Button>
@@ -580,6 +607,21 @@ const AdminPanel = () => {
                   </Select>
                 </div>
                 <div className="space-y-2"><Label>Name</Label><Input required value={editCompForm.name} onChange={(e) => setEditCompForm({ ...editCompForm, name: e.target.value })} /></div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Type</Label>
+                    <Select value={editCompForm.session_type} onValueChange={(v) => setEditCompForm({ ...editCompForm, session_type: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>{SESSION_TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  {editCompForm.session_type === 'other' && (
+                    <div className="space-y-2">
+                      <Label>Custom label</Label>
+                      <Input placeholder="e.g. Panel Discussion" value={editCompForm.type_label} onChange={(e) => setEditCompForm({ ...editCompForm, type_label: e.target.value })} />
+                    </div>
+                  )}
+                </div>
                 <div className="space-y-2"><Label>Description</Label><Textarea value={editCompForm.description} onChange={(e) => setEditCompForm({ ...editCompForm, description: e.target.value })} /></div>
                 <div className="space-y-2"><Label>Poster image URL</Label><Input value={editCompForm.poster_url} onChange={(e) => setEditCompForm({ ...editCompForm, poster_url: e.target.value })} /></div>
                 <div className="space-y-2"><Label>Venue</Label><Input value={editCompForm.venue} onChange={(e) => setEditCompForm({ ...editCompForm, venue: e.target.value })} /></div>
@@ -589,7 +631,7 @@ const AdminPanel = () => {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2"><Label>Capacity</Label><Input type="number" min={1} value={editCompForm.capacity} onChange={(e) => setEditCompForm({ ...editCompForm, capacity: e.target.value })} /></div>
-                  <div className="space-y-2"><Label>Rules URL</Label><Input value={editCompForm.rules_url} onChange={(e) => setEditCompForm({ ...editCompForm, rules_url: e.target.value })} /></div>
+                  <div className="space-y-2"><Label>Resource link (rules / agenda / slides)</Label><Input value={editCompForm.rules_url} onChange={(e) => setEditCompForm({ ...editCompForm, rules_url: e.target.value })} /></div>
                 </div>
                 <div className="space-y-2">
                   <Label>Max venue scans per ticket</Label>

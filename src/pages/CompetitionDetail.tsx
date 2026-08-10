@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { CalendarDays, MapPin, ArrowLeft, CheckCircle2, FileText, Users } from 'lucide-react';
 import { formatDateTime } from '@/lib/format';
+import { sessionTypeLabel, sessionTypeStyle } from '@/lib/sessionType';
 
 interface Competition {
   id: string;
@@ -19,6 +20,8 @@ interface Competition {
   end_time: string | null;
   capacity: number | null;
   rules_url: string | null;
+  session_type: string;
+  type_label: string | null;
   events: { name: string; banner_url: string | null } | null;
 }
 
@@ -34,7 +37,7 @@ const CompetitionDetail = () => {
     if (!id) return;
     supabase
       .from('competitions')
-      .select('id, name, description, poster_url, venue, start_time, end_time, capacity, rules_url, events(name, banner_url)')
+      .select('id, name, description, poster_url, venue, start_time, end_time, capacity, rules_url, session_type, type_label, events(name, banner_url)')
       .eq('id', id)
       .maybeSingle()
       .then(({ data }) => {
@@ -74,8 +77,8 @@ const CompetitionDetail = () => {
 
   if (!competition) {
     return <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background">
-      <p className="text-muted-foreground">This competition could not be found.</p>
-      <Link to="/"><Button variant="outline" className="rounded-full">Back to competitions</Button></Link>
+      <p className="text-muted-foreground">This could not be found.</p>
+      <Link to="/"><Button variant="outline" className="rounded-full">Back to schedule</Button></Link>
     </div>;
   }
 
@@ -88,7 +91,7 @@ const CompetitionDetail = () => {
 
       <div className="max-w-5xl mx-auto px-6 py-8">
         <Link to="/" className="inline-flex items-center gap-2 text-xs font-semibold tracking-wider text-muted-foreground hover:text-foreground mb-8">
-          <ArrowLeft className="h-3.5 w-3.5" /> ALL COMPETITIONS
+          <ArrowLeft className="h-3.5 w-3.5" /> BACK TO SCHEDULE
         </Link>
 
         <div className="grid lg:grid-cols-2 gap-10">
@@ -98,9 +101,14 @@ const CompetitionDetail = () => {
                 <img src={competition.poster_url} alt={`${competition.name} poster`} className="w-full h-full object-cover" />
               ) : null}
             </div>
-            {competition.events?.name && (
-              <p className="mt-6 text-[11px] font-semibold tracking-[0.2em] uppercase text-primary">{competition.events.name}</p>
-            )}
+            <div className="mt-6 flex items-center gap-2">
+              {competition.events?.name && (
+                <p className="text-[11px] font-semibold tracking-[0.2em] uppercase text-primary">{competition.events.name}</p>
+              )}
+              <span className={`text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full ${sessionTypeStyle(competition.session_type).badgeClass}`}>
+                {sessionTypeLabel(competition.session_type, competition.type_label)}
+              </span>
+            </div>
             <h1 className="font-heading text-3xl sm:text-4xl font-bold tracking-tight mt-2">{competition.name}</h1>
             {competition.description && (
               <p className="mt-4 text-muted-foreground leading-relaxed whitespace-pre-line">{competition.description}</p>
@@ -111,7 +119,7 @@ const CompetitionDetail = () => {
               {competition.capacity && <div className="flex items-center gap-2"><Users className="h-4 w-4 text-primary" />{competition.capacity} seats</div>}
               {competition.rules_url && (
                 <a href={competition.rules_url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-primary hover:underline">
-                  <FileText className="h-4 w-4" /> Rules &amp; guidelines
+                  <FileText className="h-4 w-4" /> {competition.session_type === 'competition' ? 'Rules & guidelines' : 'More details'}
                 </a>
               )}
             </div>
