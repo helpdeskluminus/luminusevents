@@ -75,7 +75,9 @@ export type Database = {
           name: string
           poster_url: string | null
           rules_url: string | null
+          session_type: string
           start_time: string | null
+          type_label: string | null
           updated_at: string
           venue: string | null
         }
@@ -91,7 +93,9 @@ export type Database = {
           name: string
           poster_url?: string | null
           rules_url?: string | null
+          session_type?: string
           start_time?: string | null
+          type_label?: string | null
           updated_at?: string
           venue?: string | null
         }
@@ -107,7 +111,9 @@ export type Database = {
           name?: string
           poster_url?: string | null
           rules_url?: string | null
+          session_type?: string
           start_time?: string | null
+          type_label?: string | null
           updated_at?: string
           venue?: string | null
         }
@@ -271,6 +277,7 @@ export type Database = {
         Row: {
           competition_id: string
           created_at: string
+          currently_inside: boolean
           email_sent_at: string | null
           id: string
           participant_id: string
@@ -282,6 +289,7 @@ export type Database = {
         Insert: {
           competition_id: string
           created_at?: string
+          currently_inside?: boolean
           email_sent_at?: string | null
           id?: string
           participant_id: string
@@ -293,6 +301,7 @@ export type Database = {
         Update: {
           competition_id?: string
           created_at?: string
+          currently_inside?: boolean
           email_sent_at?: string | null
           id?: string
           participant_id?: string
