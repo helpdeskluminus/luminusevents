@@ -194,7 +194,27 @@ Deno.serve(async (req) => {
       return json({ error: "RESEND_API_KEY not configured — nothing was sent" }, 400);
     }
 
-    const html = renderHtml(subject, message);
+    // Header event name: join through the competition when the audience is
+    // competition-scoped, otherwise fall back to the most recent event.
+    let eventName = "Techfest";
+    if (audienceType === "competition_participants" && competitionId) {
+      const { data: comp } = await admin
+        .from("competitions")
+        .select("events ( name )")
+        .eq("id", competitionId)
+        .maybeSingle();
+      eventName = (comp?.events as unknown as { name: string } | null)?.name || eventName;
+    } else {
+      const { data: ev } = await admin
+        .from("events")
+        .select("name")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      eventName = ev?.name || eventName;
+    }
+
+    const html = renderHtml(subject, message, eventName);
 
     // Resend's batch endpoint accepts up to 100 messages per call.
     let ok = 0, failed = 0;
