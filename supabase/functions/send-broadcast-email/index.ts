@@ -22,24 +22,92 @@ const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-function renderHtml(subject: string, bodyText: string): string {
+function renderHtml(subject: string, bodyText: string, eventName: string): string {
   const paragraphs = bodyText
     .split(/\n{2,}/)
-    .map((p) => `<p style="margin:0 0 14px;font-size:14px;line-height:1.7;color:#262626;">${esc(p).replace(/\n/g, "<br/>")}</p>`)
+    .map(
+      (p) =>
+        `<tr><td style="padding:0 0 14px;"><p style="margin:0;font-size:15px;line-height:1.7;color:#52525b;">${esc(p).replace(/\n/g, "<br/>")}</p></td></tr>`,
+    )
     .join("");
 
+  const preheader = bodyText.replace(/\s+/g, " ").slice(0, 120);
+
   return `<!doctype html>
-<html><body style="margin:0;padding:0;background:#f4f4f5;font-family:Inter,Helvetica,Arial,sans-serif;color:#0a0a0a;">
-  <div style="max-width:560px;margin:0 auto;padding:24px 16px;">
-    <div style="background:#ffffff;border:1px solid #e5e5e5;border-radius:16px;overflow:hidden;padding:28px 24px;">
-      <p style="margin:0 0 4px;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#ff29c3;font-weight:700;">ANNOUNCEMENT</p>
-      <h1 style="margin:0 0 18px;font-size:22px;line-height:1.3;font-weight:700;">${esc(subject)}</h1>
-      ${paragraphs}
-    </div>
-    <p style="text-align:center;font-size:11px;color:#a3a3a3;margin:16px 0 0;">
-      This is an automated no-reply message from the fest organising team.
+<html lang="en"><head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${esc(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f1f0f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">
+  ${esc(preheader)} &#8199;&#8199;&#8199;&#8199;&#8199;&#8199;&#8199;&#8199;&#8199;&#8199;&#8199;&#8199;&#8199;&#8199;&#8199;&#8199;&#8199;&#8199;&#8199;&#8199;
+</div>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f0f4;">
+<tr><td align="center" style="padding:32px 16px;">
+
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;">
+
+  <tr><td style="padding:0 4px 20px;">
+    <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+      <td style="font-family:Georgia,'Times New Roman',serif;font-size:20px;font-weight:700;letter-spacing:-0.3px;color:#18181b;">
+        ${esc(eventName)}<span style="color:#ec1cb4;">.</span>
+      </td>
+    </tr></table>
+  </td></tr>
+
+  <tr><td style="background-color:#ffffff;border-radius:24px;overflow:hidden;box-shadow:0 1px 3px rgba(24,24,27,0.06);">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+
+    <tr><td style="background-color:#ec1cb4;background-image:linear-gradient(115deg,#ec1cb4 0%,#ec1cb4 45%,#7c3aed 100%);padding:36px 32px 30px;">
+      <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+        <td style="background-color:rgba(255,255,255,0.18);border-radius:100px;padding:6px 14px;">
+          <span style="font-size:11px;font-weight:700;letter-spacing:2px;color:#ffffff;text-transform:uppercase;">Announcement</span>
+        </td>
+      </tr></table>
+      <p style="margin:18px 0 2px;font-size:12px;font-weight:600;letter-spacing:2px;color:rgba(255,255,255,0.85);text-transform:uppercase;">${esc(eventName)}</p>
+      <h1 style="margin:0;font-size:28px;line-height:1.25;font-weight:800;color:#ffffff;font-family:Georgia,'Times New Roman',serif;">${esc(subject)}</h1>
+    </td></tr>
+
+    <tr><td style="padding:28px 32px 8px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#faf9fb;border-radius:16px;">
+        <tr><td style="padding:20px 22px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            ${paragraphs}
+          </table>
+        </td></tr>
+      </table>
+    </td></tr>
+
+    <tr><td style="padding:16px 0 8px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td width="32" style="padding:0;"><div style="width:24px;height:24px;background-color:#f1f0f4;border-radius:100px;margin-left:20px;"></div></td>
+        <td style="border-top:2px dashed #e4e4e7;font-size:0;line-height:0;">&nbsp;</td>
+        <td width="32" style="padding:0;"><div style="width:24px;height:24px;background-color:#f1f0f4;border-radius:100px;margin-right:20px;"></div></td>
+      </tr></table>
+    </td></tr>
+
+    <tr><td style="padding:8px 32px 30px;" align="center">
+      <p style="margin:0;font-size:12.5px;line-height:1.6;color:#a1a1aa;">
+        Sent to you because you're registered with ${esc(eventName)}.
+      </p>
+    </td></tr>
+
+  </table>
+  </td></tr>
+
+  <tr><td style="padding:24px 4px 4px;" align="center">
+    <p style="margin:0;font-size:12px;color:#a1a1aa;line-height:1.7;">
+      This is an automated message from ${esc(eventName)} &mdash; please don't reply.<br/>
+      Questions about your registration? Reach out to the event organisers.
     </p>
-  </div>
+  </td></tr>
+
+</table>
+
+</td></tr>
+</table>
 </body></html>`;
 }
 
