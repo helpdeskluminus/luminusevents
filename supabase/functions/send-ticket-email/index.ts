@@ -8,6 +8,11 @@ import QRCode from "https://esm.sh/qrcode@1.5.4";
 import { corsHeaders, json } from "../_shared/qr.ts";
 
 const FALLBACK_FROM = "Techfest Tickets <onboarding@resend.dev>";
+// Resend's send-from address needs a domain we've verified in Resend (gmail.com
+// can't be verified — Google, not us, controls its DNS). Until a custom domain
+// is verified, we send from Resend's shared onboarding@resend.dev and route
+// replies to the real helpdesk inbox instead.
+const REPLY_TO = Deno.env.get("REPLY_TO_EMAIL") || "helpdesk.luminus@gmail.com";
 
 function fmt(dt: string | null): string {
   if (!dt) return "TBA";
@@ -213,6 +218,7 @@ Deno.serve(async (req) => {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         from: Deno.env.get("FROM_EMAIL") || FALLBACK_FROM,
+        reply_to: REPLY_TO,
         to: [participant.email],
         subject: `Your ${meta.label.toLowerCase()} ticket for ${competition.name} - ${eventName}`,
         html,

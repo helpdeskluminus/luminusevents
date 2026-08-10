@@ -17,6 +17,10 @@ function json(body: unknown, status = 200) {
 }
 
 const FALLBACK_FROM = "Techfest <onboarding@resend.dev>";
+// See send-ticket-email for why this isn't FROM_EMAIL directly: Resend needs a
+// verified domain to send *from*, which gmail.com can't be. Replies still land
+// in the real helpdesk inbox via Reply-To.
+const REPLY_TO = Deno.env.get("REPLY_TO_EMAIL") || "helpdesk.luminus@gmail.com";
 const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 
 const esc = (s: string) =>
@@ -113,7 +117,7 @@ function renderHtml(subject: string, bodyText: string, eventName: string): strin
 
 async function sendBatch(apiKey: string, from: string, subject: string, html: string, emails: string[]): Promise<{ ok: number; failed: number }> {
   if (emails.length === 0) return { ok: 0, failed: 0 };
-  const payload = emails.map((to) => ({ from, to: [to], subject, html }));
+  const payload = emails.map((to) => ({ from, reply_to: REPLY_TO, to: [to], subject, html }));
   const res = await fetch("https://api.resend.com/emails/batch", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
