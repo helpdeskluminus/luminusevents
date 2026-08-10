@@ -280,9 +280,6 @@ export type Database = {
           currently_inside: boolean
           email_sent_at: string | null
           id: string
-          last_entry_at: string | null
-          last_exit_at: string | null
-          last_exit_by: string | null
           participant_id: string
           qr_secret_token: string
           status: string
@@ -295,9 +292,6 @@ export type Database = {
           currently_inside?: boolean
           email_sent_at?: string | null
           id?: string
-          last_entry_at?: string | null
-          last_exit_at?: string | null
-          last_exit_by?: string | null
           participant_id: string
           qr_secret_token: string
           status?: string
@@ -310,9 +304,6 @@ export type Database = {
           currently_inside?: boolean
           email_sent_at?: string | null
           id?: string
-          last_entry_at?: string | null
-          last_exit_at?: string | null
-          last_exit_by?: string | null
           participant_id?: string
           qr_secret_token?: string
           status?: string
@@ -386,7 +377,7 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "admin" | "disciplinary" | "event_oc" | "gate_staff"
+      app_role: "admin" | "disciplinary" | "event_oc"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -514,7 +505,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "disciplinary", "event_oc", "gate_staff"],
+      app_role: ["admin", "disciplinary", "event_oc"],
     },
   },
 } as const

@@ -14,6 +14,7 @@ import { Helmet } from 'react-helmet-async';
 import { formatDateTime } from '@/lib/format';
 import { Trash2, Sparkles, Upload } from 'lucide-react';
 import { BulkUploadDialog } from '@/components/BulkUploadDialog';
+import { CoverImageGallery } from '@/components/CoverImageGallery';
 import { SESSION_TYPES, sessionTypeLabel } from '@/lib/sessionType';
 
 interface EventRow { id: string; name: string; description: string | null; banner_url: string | null; start_date: string | null; end_date: string | null; max_gate_scans?: number }
@@ -423,7 +424,7 @@ const AdminPanel = () => {
             <h2 className="font-heading text-lg font-semibold">New event</h2>
             <div className="space-y-2"><Label>Name</Label><Input required value={eventForm.name} onChange={(e) => setEventForm({ ...eventForm, name: e.target.value })} /></div>
             <div className="space-y-2"><Label>Description</Label><Textarea value={eventForm.description} onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })} /></div>
-            <div className="space-y-2"><Label>Banner image URL</Label><Input value={eventForm.banner_url} onChange={(e) => setEventForm({ ...eventForm, banner_url: e.target.value })} /></div>
+            <CoverImageGallery label="Cover image" name={eventForm.name} value={eventForm.banner_url} onChange={(url) => setEventForm((f) => ({ ...f, banner_url: url }))} />
             <div className="space-y-2">
               <Label className="flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-primary" /> Or upload a poster to auto-fill</Label>
               <label className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border p-4 text-xs text-muted-foreground cursor-pointer hover:border-primary/50">
@@ -484,7 +485,7 @@ const AdminPanel = () => {
               <form onSubmit={saveEditEvent} className="space-y-4">
                 <div className="space-y-2"><Label>Name</Label><Input required value={editEventForm.name} onChange={(e) => setEditEventForm({ ...editEventForm, name: e.target.value })} /></div>
                 <div className="space-y-2"><Label>Description</Label><Textarea value={editEventForm.description} onChange={(e) => setEditEventForm({ ...editEventForm, description: e.target.value })} /></div>
-                <div className="space-y-2"><Label>Banner image URL</Label><Input value={editEventForm.banner_url} onChange={(e) => setEditEventForm({ ...editEventForm, banner_url: e.target.value })} /></div>
+                <CoverImageGallery label="Cover image" name={editEventForm.name} value={editEventForm.banner_url} onChange={(url) => setEditEventForm((f) => ({ ...f, banner_url: url }))} />
                 <div className="space-y-2">
                   <Label>Max main-gate scans per ticket</Label>
                   <Input type="number" min={0} value={editEventForm.max_gate_scans} onChange={(e) => setEditEventForm({ ...editEventForm, max_gate_scans: e.target.value })} />
@@ -526,7 +527,7 @@ const AdminPanel = () => {
               )}
             </div>
             <div className="space-y-2"><Label>Description</Label><Textarea value={compForm.description} onChange={(e) => setCompForm({ ...compForm, description: e.target.value })} /></div>
-            <div className="space-y-2"><Label>Poster image URL</Label><Input value={compForm.poster_url} onChange={(e) => setCompForm({ ...compForm, poster_url: e.target.value })} /></div>
+            <CoverImageGallery label="Poster image" name={compForm.name} value={compForm.poster_url} onChange={(url) => setCompForm((f) => ({ ...f, poster_url: url }))} />
             <div className="space-y-2">
               <Label className="flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-primary" /> Or upload a poster to auto-fill</Label>
               <label className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-border p-4 text-xs text-muted-foreground cursor-pointer hover:border-primary/50">
@@ -623,7 +624,7 @@ const AdminPanel = () => {
                   )}
                 </div>
                 <div className="space-y-2"><Label>Description</Label><Textarea value={editCompForm.description} onChange={(e) => setEditCompForm({ ...editCompForm, description: e.target.value })} /></div>
-                <div className="space-y-2"><Label>Poster image URL</Label><Input value={editCompForm.poster_url} onChange={(e) => setEditCompForm({ ...editCompForm, poster_url: e.target.value })} /></div>
+                <CoverImageGallery label="Poster image" name={editCompForm.name} value={editCompForm.poster_url} onChange={(url) => setEditCompForm((f) => ({ ...f, poster_url: url }))} />
                 <div className="space-y-2"><Label>Venue</Label><Input value={editCompForm.venue} onChange={(e) => setEditCompForm({ ...editCompForm, venue: e.target.value })} /></div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2"><Label>Start</Label><Input type="datetime-local" value={editCompForm.start_time} onChange={(e) => setEditCompForm({ ...editCompForm, start_time: e.target.value })} /></div>
