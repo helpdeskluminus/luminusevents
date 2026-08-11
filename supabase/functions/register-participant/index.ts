@@ -124,6 +124,7 @@ Deno.serve(async (req) => {
     }
 
     // Fire the ticket email (non-blocking for the user's response quality)
+    let emailSent = false;
     try {
       const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/send-ticket-email`, {
         method: "POST",
@@ -133,12 +134,18 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({ registration_id: registration.id }),
       });
-      if (!res.ok) console.error("ticket email failed", res.status, await res.text());
+      if (!res.ok) {
+        console.error("ticket email failed", res.status, await res.text());
+      } else {
+        const out = await res.json().catch(() => null);
+        emailSent = out?.success === true;
+        if (!emailSent) console.warn("ticket email not delivered", out);
+      }
     } catch (e) {
       console.error("ticket email error", e);
     }
 
-    return json({ success: true, ticket_code: registration.ticket_code, competition: competition.name });
+    return json({ success: true, ticket_code: registration.ticket_code, competition: competition.name, email_sent: emailSent });
   } catch (e) {
     console.error(e);
     return json({ error: "Unexpected error" }, 500);

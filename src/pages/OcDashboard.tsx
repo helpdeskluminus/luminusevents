@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScanLine, CheckCircle2, Circle } from 'lucide-react';
 import { BulkUploadDialog } from '@/components/BulkUploadDialog';
+import { AddParticipantDialog } from '@/components/AddParticipantDialog';
 
 interface RegRow {
   id: string;
@@ -107,6 +108,7 @@ const OcPanel = () => {
           placeholder="Search by name, email or ticket code"
           className="flex-1"
         />
+        <AddParticipantDialog competitions={[]} fixedCompetitionId={competitionId} />
         <BulkUploadDialog competitions={[]} fixedCompetitionId={competitionId} />
       </div>
 

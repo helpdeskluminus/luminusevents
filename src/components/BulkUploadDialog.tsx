@@ -57,7 +57,7 @@ export const BulkUploadDialog = ({ competitions, fixedCompetitionId }: BulkUploa
     });
     setUploading(false);
 
-    const payload = data as { error?: string; registered?: number; duplicates?: number; failed?: number; results?: BulkResultRow[] } | null;
+    const payload = data as { error?: string; registered?: number; duplicates?: number; failed?: number; emails_configured?: boolean; results?: BulkResultRow[] } | null;
     if (error || payload?.error) return toast.error(payload?.error ?? 'Bulk upload failed');
 
     setResults({
@@ -67,6 +67,9 @@ export const BulkUploadDialog = ({ competitions, fixedCompetitionId }: BulkUploa
       rows: payload!.results ?? [],
     });
     toast.success(`Registered ${payload!.registered ?? 0} of ${rows.length}`);
+    if (sendEmails && payload?.emails_configured === false) {
+      toast.warning('Tickets created, but no emails were sent — email sending is not configured yet.');
+    }
   };
 
   return (

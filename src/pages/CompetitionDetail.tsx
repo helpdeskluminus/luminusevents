@@ -65,8 +65,13 @@ const CompetitionDetail = () => {
       toast.error(message);
       return;
     }
-    setTicketCode((data as { ticket_code: string }).ticket_code);
-    toast.success('Registered! Your QR ticket is on its way by email.');
+    const payload = data as { ticket_code: string; email_sent?: boolean };
+    setTicketCode(payload.ticket_code);
+    toast.success(
+      payload.email_sent === false
+        ? 'Registered! Save your ticket code below — the email could not be sent right now.'
+        : 'Registered! Your QR ticket is on its way by email.',
+    );
   };
 
   if (loading) {
