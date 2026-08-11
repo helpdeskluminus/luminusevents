@@ -14,6 +14,7 @@ import { Helmet } from 'react-helmet-async';
 import { formatDateTime } from '@/lib/format';
 import { Trash2, Sparkles, Upload } from 'lucide-react';
 import { BulkUploadDialog } from '@/components/BulkUploadDialog';
+import { AddParticipantDialog } from '@/components/AddParticipantDialog';
 import { CoverImageGallery } from '@/components/CoverImageGallery';
 import { SESSION_TYPES, sessionTypeLabel } from '@/lib/sessionType';
 
@@ -577,7 +578,8 @@ const AdminPanel = () => {
           </form>
 
           <div className="space-y-3">
-            <div className="flex justify-end">
+            <div className="flex flex-wrap justify-end gap-2">
+              <AddParticipantDialog competitions={competitions.map((c) => ({ id: c.id, name: c.name }))} />
               <BulkUploadDialog competitions={competitions.map((c) => ({ id: c.id, name: c.name }))} />
             </div>
             {competitions.map((c) => (
