@@ -67,6 +67,7 @@ Deno.serve(async (req) => {
       existingCount = count ?? 0;
     }
 
+    const emailsConfigured = !!Deno.env.get("RESEND_API_KEY");
     const results: { row: number; email: string; status: "registered" | "duplicate" | "error"; message?: string; ticket_code?: string }[] = [];
     let registeredCount = 0;
 
@@ -159,6 +160,8 @@ Deno.serve(async (req) => {
       success: true,
       competition: competition.name,
       total: rows.length,
+      emails_configured: emailsConfigured,
+      emails_requested: sendEmails,
       registered: registeredCount,
       duplicates: results.filter((r) => r.status === "duplicate").length,
       failed: results.filter((r) => r.status === "error").length,
