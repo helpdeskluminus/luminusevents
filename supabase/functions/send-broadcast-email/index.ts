@@ -112,20 +112,8 @@ function renderHtml(subject: string, bodyText: string, eventName: string): strin
 </body></html>`;
 }
 
-async function sendBatch(apiKey: string, from: string, subject: string, html: string, emails: string[]): Promise<{ ok: number; failed: number }> {
-  if (emails.length === 0) return { ok: 0, failed: 0 };
-  const payload = emails.map((to) => ({ from, reply_to: REPLY_TO, to: [to], subject, html }));
-  const res = await fetch("https://api.resend.com/emails/batch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    console.error("Resend batch failed", res.status, await res.text());
-    return { ok: 0, failed: emails.length };
-  }
-  return { ok: emails.length, failed: 0 };
-}
+
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
