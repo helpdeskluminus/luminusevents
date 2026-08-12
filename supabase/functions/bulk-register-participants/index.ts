@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
       existingCount = count ?? 0;
     }
 
-    const emailsConfigured = !!Deno.env.get("RESEND_API_KEY");
+    const emailsConfigured = !!Deno.env.get("GMAIL_USER") && !!Deno.env.get("GMAIL_APP_PASSWORD");
     const results: { row: number; email: string; status: "registered" | "duplicate" | "error"; message?: string; ticket_code?: string }[] = [];
     let registeredCount = 0;
 

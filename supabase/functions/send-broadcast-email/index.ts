@@ -1,7 +1,8 @@
 // Admin-only: send an arbitrary, admin-authored email (instructions, updates, etc.)
-// to a chosen audience, from the same no-reply address as ticket emails.
+// to a chosen audience, from the fest's Gmail address over SMTP.
 // Every send is logged to public.email_broadcasts for audit purposes.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { MailConfigError, gmailCredentials, sendBulkMail } from "../_shared/mailer.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -16,15 +17,11 @@ function json(body: unknown, status = 200) {
   });
 }
 
-const FALLBACK_FROM = "Techfest <onboarding@resend.dev>";
-// See send-ticket-email for why this isn't FROM_EMAIL directly: Resend needs a
-// verified domain to send *from*, which gmail.com can't be. Replies still land
-// in the real helpdesk inbox via Reply-To.
-const REPLY_TO = Deno.env.get("REPLY_TO_EMAIL") || "helpdesk.luminus@gmail.com";
 const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
 
 function renderHtml(subject: string, bodyText: string, eventName: string): string {
   const paragraphs = bodyText
@@ -115,20 +112,8 @@ function renderHtml(subject: string, bodyText: string, eventName: string): strin
 </body></html>`;
 }
 
-async function sendBatch(apiKey: string, from: string, subject: string, html: string, emails: string[]): Promise<{ ok: number; failed: number }> {
-  if (emails.length === 0) return { ok: 0, failed: 0 };
-  const payload = emails.map((to) => ({ from, reply_to: REPLY_TO, to: [to], subject, html }));
-  const res = await fetch("https://api.resend.com/emails/batch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    console.error("Resend batch failed", res.status, await res.text());
-    return { ok: 0, failed: emails.length };
-  }
-  return { ok: emails.length, failed: 0 };
-}
+
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -185,17 +170,20 @@ Deno.serve(async (req) => {
     emails = Array.from(new Set(emails));
 
     if (emails.length === 0) return json({ error: "No recipients matched this audience" }, 400);
-    if (emails.length > 5000) return json({ error: "Audience too large for a single broadcast (max 5000) — narrow it down" }, 400);
+    // Gmail's free sending cap is ~500 recipients/day, so a single broadcast can't exceed it.
+    if (emails.length > 500) {
+      return json({ error: `This audience has ${emails.length} recipients — Gmail allows about 500 emails per day. Narrow the audience down.` }, 400);
+    }
 
-    const apiKey = Deno.env.get("RESEND_API_KEY");
-    const from = Deno.env.get("FROM_EMAIL") || FALLBACK_FROM;
-
-    if (!apiKey) {
+    try {
+      gmailCredentials();
+    } catch (e) {
+      const reason = e instanceof MailConfigError ? e.message : String(e);
       await admin.from("email_broadcasts").insert({
         subject, body: message, audience_type: audienceType, competition_id: audienceType === "competition_participants" ? competitionId : null,
-        recipient_count: emails.length, failed_count: emails.length, sent_by: callerId, status: "failed", error: "RESEND_API_KEY not configured",
+        recipient_count: 0, failed_count: emails.length, sent_by: callerId, status: "failed", error: reason,
       });
-      return json({ error: "RESEND_API_KEY not configured — nothing was sent" }, 400);
+      return json({ error: reason }, 400);
     }
 
     // Header event name: join through the competition when the audience is
@@ -220,21 +208,16 @@ Deno.serve(async (req) => {
 
     const html = renderHtml(subject, message, eventName);
 
-    // Resend's batch endpoint accepts up to 100 messages per call.
-    let ok = 0, failed = 0;
-    for (let i = 0; i < emails.length; i += 100) {
-      const chunk = emails.slice(i, i + 100);
-      const result = await sendBatch(apiKey, from, subject, html, chunk);
-      ok += result.ok;
-      failed += result.failed;
-    }
+    // One SMTP connection, one message per recipient (no shared To: header).
+    const { ok, failed, lastError } = await sendBulkMail(emails, subject, html, eventName);
+
 
     const status = failed === 0 ? "sent" : ok === 0 ? "failed" : "partial";
 
     await admin.from("email_broadcasts").insert({
       subject, body: message, audience_type: audienceType, competition_id: audienceType === "competition_participants" ? competitionId : null,
       recipient_count: ok, failed_count: failed, sent_by: callerId, status,
-      error: failed > 0 ? `${failed} of ${emails.length} failed to send` : null,
+      error: failed > 0 ? `${failed} of ${emails.length} failed to send${lastError ? ` — ${lastError}` : ""}` : null,
     });
 
     return json({ success: status !== "failed", sent: ok, failed, total: emails.length });

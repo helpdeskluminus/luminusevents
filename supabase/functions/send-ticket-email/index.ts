@@ -1,18 +1,12 @@
-// Sends the QR ticket email for a registration.
+// Sends the QR ticket email for a registration over Gmail SMTP.
 //
-// TODO: Add the `RESEND_API_KEY` secret in Project Settings -> Secrets before this
-// function can deliver mail. Also add `FROM_EMAIL` (e.g. "Techfest <no-reply@yourdomain.com>")
-// using a domain that is verified in Resend.
+// Requires the `GMAIL_USER` and `GMAIL_APP_PASSWORD` secrets (Project Settings -> Secrets).
+// No custom domain is needed — Gmail delivers to any recipient, ~500/day free.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import QRCode from "https://esm.sh/qrcode@1.5.4";
 import { corsHeaders, json } from "../_shared/qr.ts";
+import { MailConfigError, sendMail } from "../_shared/mailer.ts";
 
-const FALLBACK_FROM = "Techfest Tickets <onboarding@resend.dev>";
-// Resend's send-from address needs a domain we've verified in Resend (gmail.com
-// can't be verified — Google, not us, controls its DNS). Until a custom domain
-// is verified, we send from Resend's shared onboarding@resend.dev and route
-// replies to the real helpdesk inbox instead.
-const REPLY_TO = Deno.env.get("REPLY_TO_EMAIL") || "helpdesk.luminus@gmail.com";
 
 function fmt(dt: string | null): string {
   if (!dt) return "TBA";
@@ -207,32 +201,27 @@ Deno.serve(async (req) => {
 </table>
 </body></html>`;
 
-    const apiKey = Deno.env.get("RESEND_API_KEY");
-    if (!apiKey) {
-      console.warn("RESEND_API_KEY not configured - ticket email skipped");
-      return json({ success: false, skipped: true, reason: "RESEND_API_KEY not configured", qr_url: qrUrl });
-    }
-
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        from: Deno.env.get("FROM_EMAIL") || FALLBACK_FROM,
-        reply_to: REPLY_TO,
-        to: [participant.email],
-        subject: `Your ${meta.label.toLowerCase()} ticket for ${competition.name} - ${eventName}`,
-        html,
-      }),
-    });
-
-    if (!res.ok) {
-      const details = await res.text();
-      console.error("Resend failed", res.status, details);
-      return json({ error: "Email provider rejected the request", status: res.status, details }, res.status);
+    try {
+      await sendMail(
+        {
+          to: participant.email,
+          subject: `Your ${meta.label.toLowerCase()} ticket for ${competition.name} - ${eventName}`,
+          html,
+        },
+        `${eventName} Tickets`,
+      );
+    } catch (e) {
+      if (e instanceof MailConfigError) {
+        console.warn("Gmail SMTP not configured - ticket email skipped");
+        return json({ success: false, skipped: true, reason: e.message, qr_url: qrUrl });
+      }
+      console.error("Gmail SMTP send failed", e);
+      return json({ error: "Could not send the ticket email over Gmail SMTP", details: String(e), qr_url: qrUrl }, 502);
     }
 
     await admin.from("registrations").update({ email_sent_at: new Date().toISOString() }).eq("id", reg.id);
     return json({ success: true, qr_url: qrUrl });
+
   } catch (e) {
     console.error(e);
     return json({ error: String(e) }, 500);
