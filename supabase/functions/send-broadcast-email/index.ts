@@ -170,17 +170,20 @@ Deno.serve(async (req) => {
     emails = Array.from(new Set(emails));
 
     if (emails.length === 0) return json({ error: "No recipients matched this audience" }, 400);
-    if (emails.length > 5000) return json({ error: "Audience too large for a single broadcast (max 5000) — narrow it down" }, 400);
+    // Gmail's free sending cap is ~500 recipients/day, so a single broadcast can't exceed it.
+    if (emails.length > 500) {
+      return json({ error: `This audience has ${emails.length} recipients — Gmail allows about 500 emails per day. Narrow the audience down.` }, 400);
+    }
 
-    const apiKey = Deno.env.get("RESEND_API_KEY");
-    const from = Deno.env.get("FROM_EMAIL") || FALLBACK_FROM;
-
-    if (!apiKey) {
+    try {
+      gmailCredentials();
+    } catch (e) {
+      const reason = e instanceof MailConfigError ? e.message : String(e);
       await admin.from("email_broadcasts").insert({
         subject, body: message, audience_type: audienceType, competition_id: audienceType === "competition_participants" ? competitionId : null,
-        recipient_count: emails.length, failed_count: emails.length, sent_by: callerId, status: "failed", error: "RESEND_API_KEY not configured",
+        recipient_count: 0, failed_count: emails.length, sent_by: callerId, status: "failed", error: reason,
       });
-      return json({ error: "RESEND_API_KEY not configured — nothing was sent" }, 400);
+      return json({ error: reason }, 400);
     }
 
     // Header event name: join through the competition when the audience is
@@ -205,14 +208,9 @@ Deno.serve(async (req) => {
 
     const html = renderHtml(subject, message, eventName);
 
-    // Resend's batch endpoint accepts up to 100 messages per call.
-    let ok = 0, failed = 0;
-    for (let i = 0; i < emails.length; i += 100) {
-      const chunk = emails.slice(i, i + 100);
-      const result = await sendBatch(apiKey, from, subject, html, chunk);
-      ok += result.ok;
-      failed += result.failed;
-    }
+    // One SMTP connection, one message per recipient (no shared To: header).
+    const { ok, failed, lastError } = await sendBulkMail(emails, subject, html, eventName);
+
 
     const status = failed === 0 ? "sent" : ok === 0 ? "failed" : "partial";
 
