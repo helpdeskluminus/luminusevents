@@ -201,32 +201,27 @@ Deno.serve(async (req) => {
 </table>
 </body></html>`;
 
-    const apiKey = Deno.env.get("RESEND_API_KEY");
-    if (!apiKey) {
-      console.warn("RESEND_API_KEY not configured - ticket email skipped");
-      return json({ success: false, skipped: true, reason: "RESEND_API_KEY not configured", qr_url: qrUrl });
-    }
-
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        from: Deno.env.get("FROM_EMAIL") || FALLBACK_FROM,
-        reply_to: REPLY_TO,
-        to: [participant.email],
-        subject: `Your ${meta.label.toLowerCase()} ticket for ${competition.name} - ${eventName}`,
-        html,
-      }),
-    });
-
-    if (!res.ok) {
-      const details = await res.text();
-      console.error("Resend failed", res.status, details);
-      return json({ error: "Email provider rejected the request", status: res.status, details }, res.status);
+    try {
+      await sendMail(
+        {
+          to: participant.email,
+          subject: `Your ${meta.label.toLowerCase()} ticket for ${competition.name} - ${eventName}`,
+          html,
+        },
+        `${eventName} Tickets`,
+      );
+    } catch (e) {
+      if (e instanceof MailConfigError) {
+        console.warn("Gmail SMTP not configured - ticket email skipped");
+        return json({ success: false, skipped: true, reason: e.message, qr_url: qrUrl });
+      }
+      console.error("Gmail SMTP send failed", e);
+      return json({ error: "Could not send the ticket email over Gmail SMTP", details: String(e), qr_url: qrUrl }, 502);
     }
 
     await admin.from("registrations").update({ email_sent_at: new Date().toISOString() }).eq("id", reg.id);
     return json({ success: true, qr_url: qrUrl });
+
   } catch (e) {
     console.error(e);
     return json({ error: String(e) }, 500);
