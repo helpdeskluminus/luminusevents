@@ -6,6 +6,8 @@
 // from the request body).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders, json, signTicketToken, generateTicketCode } from "../_shared/qr.ts";
+import { MailConfigError, sendMailBatch } from "../_shared/mailer.ts";
+import { buildTicketEmailContent } from "../_shared/ticketEmail.ts";
 
 interface Row {
   name?: string;
@@ -69,6 +71,11 @@ Deno.serve(async (req) => {
 
     const emailsConfigured = !!Deno.env.get("GMAIL_USER") && !!Deno.env.get("GMAIL_APP_PASSWORD");
     const results: { row: number; email: string; status: "registered" | "duplicate" | "error"; message?: string; ticket_code?: string }[] = [];
+    // Registered rows queue up here for a single batched SMTP send after the
+    // loop, instead of each row firing its own unawaited HTTP call to
+    // send-ticket-email - Gmail throttles/rejects past a handful of
+    // concurrent SMTP connections, which was silently dropping tickets.
+    const pendingEmails: { row: number; registrationId: string; email: string }[] = [];
     let registeredCount = 0;
 
     for (let i = 0; i < rows.length; i++) {
@@ -140,19 +147,73 @@ Deno.serve(async (req) => {
         results.push({ row: i + 1, email, status: "registered", ticket_code: registration.ticket_code });
 
         if (sendEmails) {
-          // Fire-and-forget per row - don't let a slow/failed email hold up
-          // the rest of the batch or fail the registration itself.
-          fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/send-ticket-email`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
-            },
-            body: JSON.stringify({ registration_id: registration.id }),
-          }).catch((e) => console.error("bulk ticket email error", email, e));
+          pendingEmails.push({ row: i + 1, registrationId: registration.id, email });
         }
       } catch (e) {
         results.push({ row: i + 1, email, status: "error", message: e instanceof Error ? e.message : "Unexpected error" });
+      }
+    }
+
+    // ---- Send all queued ticket emails over one shared SMTP connection ----
+    let emailsSent = 0, emailsFailed = 0;
+    if (sendEmails && pendingEmails.length > 0) {
+      if (!emailsConfigured) {
+        for (const pending of pendingEmails) {
+          const r = results.find((res) => res.row === pending.row);
+          if (r) r.message = (r.message ? `${r.message}; ` : "") + "Registered, but email not sent - Gmail sending isn't configured yet";
+        }
+      } else {
+        // Building QR PNGs/HTML can happen concurrently (no shared SMTP
+        // connection needed for this part); only the actual send is serialised
+        // over one connection.
+        const built = await Promise.all(
+          pendingEmails.map(async (pending) => {
+            try {
+              const content = await buildTicketEmailContent(admin, pending.registrationId);
+              return { ...pending, content, buildError: null as string | null };
+            } catch (e) {
+              return { ...pending, content: null, buildError: e instanceof Error ? e.message : "Could not prepare email" };
+            }
+          }),
+        );
+
+        for (const b of built) {
+          if (b.buildError) {
+            emailsFailed++;
+            const r = results.find((res) => res.row === b.row);
+            if (r) r.message = (r.message ? `${r.message}; ` : "") + `Registered, but email failed: ${b.buildError}`;
+          }
+        }
+
+        const sendable = built.filter((b): b is typeof b & { content: NonNullable<typeof b.content> } => b.content !== null);
+        try {
+          const sendResults = await sendMailBatch(
+            sendable.map((b) => ({ to: b.content.to, subject: b.content.subject, html: b.content.html })),
+            competition.name,
+          );
+          const sentRegistrationIds: string[] = [];
+          sendResults.forEach((sr, idx) => {
+            const b = sendable[idx];
+            const r = results.find((res) => res.row === b.row);
+            if (sr.ok) {
+              emailsSent++;
+              sentRegistrationIds.push(b.registrationId);
+            } else {
+              emailsFailed++;
+              if (r) r.message = (r.message ? `${r.message}; ` : "") + `Registered, but email failed to send: ${sr.error ?? "unknown error"}`;
+            }
+          });
+          if (sentRegistrationIds.length > 0) {
+            await admin.from("registrations").update({ email_sent_at: new Date().toISOString() }).in("id", sentRegistrationIds);
+          }
+        } catch (e) {
+          emailsFailed += sendable.length;
+          const reason = e instanceof MailConfigError ? e.message : String(e);
+          for (const b of sendable) {
+            const r = results.find((res) => res.row === b.row);
+            if (r) r.message = (r.message ? `${r.message}; ` : "") + `Registered, but email failed to send: ${reason}`;
+          }
+        }
       }
     }
 
@@ -162,6 +223,8 @@ Deno.serve(async (req) => {
       total: rows.length,
       emails_configured: emailsConfigured,
       emails_requested: sendEmails,
+      emails_sent: emailsSent,
+      emails_failed: emailsFailed,
       registered: registeredCount,
       duplicates: results.filter((r) => r.status === "duplicate").length,
       failed: results.filter((r) => r.status === "error").length,

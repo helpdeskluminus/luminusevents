@@ -65,6 +65,39 @@ export async function sendMail(msg: MailMessage, fromName?: string): Promise<voi
 }
 
 /**
+ * Send several distinct emails (different subject/html per recipient) over a
+ * single SMTP connection. Use this instead of calling sendMail() in a loop or
+ * firing concurrent unawaited sends - Gmail throttles/rejects past a handful
+ * of simultaneous connections, which silently drops mail on bulk sends.
+ */
+export async function sendMailBatch(
+  items: { to: string; subject: string; html: string }[],
+  fromName?: string,
+): Promise<{ to: string; ok: boolean; error?: string }[]> {
+  if (items.length === 0) return [];
+  return await withClient(async (client, user) => {
+    const results: { to: string; ok: boolean; error?: string }[] = [];
+    for (const item of items) {
+      try {
+        await client.send({
+          from: fromName ? `${fromName} <${user}>` : user,
+          to: item.to,
+          replyTo: user,
+          subject: item.subject,
+          content: "auto",
+          html: item.html,
+        });
+        results.push({ to: item.to, ok: true });
+      } catch (e) {
+        console.error("SMTP batch send failed for", item.to, e);
+        results.push({ to: item.to, ok: false, error: String(e) });
+      }
+    }
+    return results;
+  });
+}
+
+/**
  * Send the same email to many recipients over a single SMTP connection.
  * Each recipient gets their own message (no shared To: header).
  */

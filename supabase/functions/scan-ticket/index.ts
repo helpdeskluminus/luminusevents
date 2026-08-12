@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
       }
       const { data } = await admin
         .from("registrations")
-        .select(`id, ticket_code, status, competition_id,
+        .select(`id, ticket_code, status, competition_id, participant_id,
           participants ( name, email, organization ),
           competitions ( id, name, venue, max_venue_scans, events ( max_gate_scans ) )`)
         .eq("qr_secret_token", token)
@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
     } else {
       const { data } = await admin
         .from("registrations")
-        .select(`id, ticket_code, status, competition_id,
+        .select(`id, ticket_code, status, competition_id, participant_id,
           participants ( name, email, organization ),
           competitions ( id, name, venue, max_venue_scans, events ( max_gate_scans ) )`)
         .eq("ticket_code", ticketCode)
@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
     const { data: allRegs } = await admin
       .from("registrations")
       .select("competition_id, competitions(name, venue, start_time)")
-      .eq("participant_id", (await admin.from("registrations").select("participant_id").eq("id", reg.id).single()).data!.participant_id);
+      .eq("participant_id", reg.participant_id);
 
     const competitions = (allRegs ?? []).map((r) => {
       const c = r.competitions as unknown as { name: string; venue: string | null; start_time: string | null } | null;

@@ -1,5 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders, json, signTicketToken, generateTicketCode, clientIp, hashIp } from "../_shared/qr.ts";
+import { MailConfigError, sendMail } from "../_shared/mailer.ts";
+import { buildTicketEmailContent } from "../_shared/ticketEmail.ts";
 
 interface Body {
   competition_id?: string;
@@ -123,29 +125,30 @@ Deno.serve(async (req) => {
       return json({ error: "Could not create registration" }, 500);
     }
 
-    // Fire the ticket email (non-blocking for the user's response quality)
+    // Send the ticket email in-process (not an HTTP call to our own
+    // send-ticket-email function) - one fewer network hop and one fewer way
+    // for this to fail independently of the actual send.
     let emailSent = false;
+    let emailSkippedReason: string | null = null;
     try {
-      const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/send-ticket-email`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
-        },
-        body: JSON.stringify({ registration_id: registration.id }),
-      });
-      if (!res.ok) {
-        console.error("ticket email failed", res.status, await res.text());
-      } else {
-        const out = await res.json().catch(() => null);
-        emailSent = out?.success === true;
-        if (!emailSent) console.warn("ticket email not delivered", out);
+      const content = await buildTicketEmailContent(admin, registration.id);
+      try {
+        await sendMail({ to: content.to, subject: content.subject, html: content.html }, `${content.eventName} Tickets`);
+        await admin.from("registrations").update({ email_sent_at: new Date().toISOString() }).eq("id", registration.id);
+        emailSent = true;
+      } catch (e) {
+        if (e instanceof MailConfigError) {
+          emailSkippedReason = e.message;
+          console.warn("ticket email skipped - Gmail SMTP not configured");
+        } else {
+          console.error("ticket email send failed", e);
+        }
       }
     } catch (e) {
-      console.error("ticket email error", e);
+      console.error("ticket email build failed", e);
     }
 
-    return json({ success: true, ticket_code: registration.ticket_code, competition: competition.name, email_sent: emailSent });
+    return json({ success: true, ticket_code: registration.ticket_code, competition: competition.name, email_sent: emailSent, email_skipped_reason: emailSkippedReason });
   } catch (e) {
     console.error(e);
     return json({ error: "Unexpected error" }, 500);

@@ -160,8 +160,16 @@ Deno.serve(async (req) => {
         .eq("status", "confirmed");
       emails = (data ?? []).map((r) => (r.participants as unknown as { email: string } | null)?.email).filter((e): e is string => !!e);
     } else if (audienceType === "all_staff") {
-      const { data } = await admin.from("user_roles").select("profiles(email)");
-      emails = (data ?? []).map((r) => (r.profiles as unknown as { email: string } | null)?.email).filter((e): e is string => !!e);
+      // user_roles.user_id and profiles.id both reference auth.users
+      // independently - there's no direct FK between user_roles and
+      // profiles, so PostgREST can't auto-embed profiles(email) here.
+      // Look up the user ids first, then their profiles.
+      const { data: roleRows } = await admin.from("user_roles").select("user_id");
+      const staffIds = Array.from(new Set((roleRows ?? []).map((r) => r.user_id)));
+      if (staffIds.length > 0) {
+        const { data: profileRows } = await admin.from("profiles").select("email").in("id", staffIds);
+        emails = (profileRows ?? []).map((p) => p.email).filter((e): e is string => !!e);
+      }
     } else {
       emails = customEmails.map((e) => String(e).trim().toLowerCase()).filter(isEmail);
     }

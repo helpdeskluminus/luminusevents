@@ -32,7 +32,7 @@ export const BulkUploadDialog = ({ competitions, fixedCompetitionId }: BulkUploa
   const [fileName, setFileName] = useState('');
   const [sendEmails, setSendEmails] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [results, setResults] = useState<{ registered: number; duplicates: number; failed: number; rows: BulkResultRow[] } | null>(null);
+  const [results, setResults] = useState<{ registered: number; duplicates: number; failed: number; emailsSent: number; emailsFailed: number; emailsRequested: boolean; rows: BulkResultRow[] } | null>(null);
 
   const reset = () => { setRows([]); setFileName(''); setResults(null); };
 
@@ -57,18 +57,23 @@ export const BulkUploadDialog = ({ competitions, fixedCompetitionId }: BulkUploa
     });
     setUploading(false);
 
-    const payload = data as { error?: string; registered?: number; duplicates?: number; failed?: number; emails_configured?: boolean; results?: BulkResultRow[] } | null;
+    const payload = data as { error?: string; registered?: number; duplicates?: number; failed?: number; emails_configured?: boolean; emails_sent?: number; emails_failed?: number; emails_requested?: boolean; results?: BulkResultRow[] } | null;
     if (error || payload?.error) return toast.error(payload?.error ?? 'Bulk upload failed');
 
     setResults({
       registered: payload!.registered ?? 0,
       duplicates: payload!.duplicates ?? 0,
       failed: payload!.failed ?? 0,
+      emailsSent: payload!.emails_sent ?? 0,
+      emailsFailed: payload!.emails_failed ?? 0,
+      emailsRequested: payload!.emails_requested ?? sendEmails,
       rows: payload!.results ?? [],
     });
     toast.success(`Registered ${payload!.registered ?? 0} of ${rows.length}`);
     if (sendEmails && payload?.emails_configured === false) {
       toast.warning('Tickets created, but no emails were sent — email sending is not configured yet.');
+    } else if (sendEmails && (payload?.emails_failed ?? 0) > 0) {
+      toast.warning(`${payload!.emails_failed} ticket email${payload!.emails_failed === 1 ? '' : 's'} failed to send — see details below.`);
     }
   };
 
@@ -129,10 +134,18 @@ export const BulkUploadDialog = ({ competitions, fixedCompetitionId }: BulkUploa
               <p className="text-xs font-semibold tracking-wider">
                 {results.registered} registered · {results.duplicates} already registered · {results.failed} failed
               </p>
-              {results.rows.filter((r) => r.status === 'error').length > 0 && (
-                <ul className="text-xs text-destructive space-y-1 max-h-40 overflow-y-auto">
-                  {results.rows.filter((r) => r.status === 'error').map((r) => (
-                    <li key={r.row}>Row {r.row} ({r.email || 'no email'}): {r.message}</li>
+              {results.emailsRequested && (
+                <p className="text-xs text-muted-foreground">
+                  {results.emailsSent} ticket email{results.emailsSent === 1 ? '' : 's'} sent
+                  {results.emailsFailed > 0 && <span className="text-destructive"> · {results.emailsFailed} failed to send</span>}
+                </p>
+              )}
+              {results.rows.some((r) => r.message && r.status !== 'duplicate') && (
+                <ul className="text-xs space-y-1 max-h-40 overflow-y-auto">
+                  {results.rows.filter((r) => r.message && r.status !== 'duplicate').map((r) => (
+                    <li key={r.row} className={r.status === 'error' ? 'text-destructive' : 'text-amber-600'}>
+                      Row {r.row} ({r.email || 'no email'}): {r.message}
+                    </li>
                   ))}
                 </ul>
               )}
