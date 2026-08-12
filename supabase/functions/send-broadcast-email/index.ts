@@ -1,7 +1,8 @@
 // Admin-only: send an arbitrary, admin-authored email (instructions, updates, etc.)
-// to a chosen audience, from the same no-reply address as ticket emails.
+// to a chosen audience, from the fest's Gmail address over SMTP.
 // Every send is logged to public.email_broadcasts for audit purposes.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { MailConfigError, gmailCredentials, sendBulkMail } from "../_shared/mailer.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -16,15 +17,11 @@ function json(body: unknown, status = 200) {
   });
 }
 
-const FALLBACK_FROM = "Techfest <onboarding@resend.dev>";
-// See send-ticket-email for why this isn't FROM_EMAIL directly: Resend needs a
-// verified domain to send *from*, which gmail.com can't be. Replies still land
-// in the real helpdesk inbox via Reply-To.
-const REPLY_TO = Deno.env.get("REPLY_TO_EMAIL") || "helpdesk.luminus@gmail.com";
 const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
 
 function renderHtml(subject: string, bodyText: string, eventName: string): string {
   const paragraphs = bodyText
