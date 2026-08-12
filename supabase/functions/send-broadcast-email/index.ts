@@ -217,7 +217,7 @@ Deno.serve(async (req) => {
     await admin.from("email_broadcasts").insert({
       subject, body: message, audience_type: audienceType, competition_id: audienceType === "competition_participants" ? competitionId : null,
       recipient_count: ok, failed_count: failed, sent_by: callerId, status,
-      error: failed > 0 ? `${failed} of ${emails.length} failed to send` : null,
+      error: failed > 0 ? `${failed} of ${emails.length} failed to send${lastError ? ` — ${lastError}` : ""}` : null,
     });
 
     return json({ success: status !== "failed", sent: ok, failed, total: emails.length });
