@@ -29,7 +29,7 @@ const emptyComp = { event_id: '', name: '', description: '', poster_url: '', ven
 const emptyStaff = { full_name: '', email: '', password: '', role: 'disciplinary', competition_id: '', position: '' };
 const emptyBroadcast = { subject: '', body: '', audience_type: 'all_participants', competition_id: '', emails: '' };
 
-interface BroadcastRow { id: string; subject: string; audience_type: string; competition_id: string | null; recipient_count: number; failed_count: number; status: string; created_at: string }
+interface BroadcastRow { id: string; subject: string; audience_type: string; competition_id: string | null; recipient_count: number; failed_count: number; status: string; created_at: string; error: string | null }
 
 const AdminPanel = () => {
   const tick = useLiveTick(['checkins', 'registrations']);
@@ -93,7 +93,7 @@ const AdminPanel = () => {
   }, []);
 
   const loadBroadcasts = useCallback(async () => {
-    const { data } = await supabase.from('email_broadcasts').select('id, subject, audience_type, competition_id, recipient_count, failed_count, status, created_at').order('created_at', { ascending: false }).limit(20);
+    const { data } = await supabase.from('email_broadcasts').select('id, subject, audience_type, competition_id, recipient_count, failed_count, status, created_at, error').order('created_at', { ascending: false }).limit(20);
     setBroadcasts((data as BroadcastRow[]) ?? []);
   }, []);
 
@@ -360,9 +360,19 @@ const AdminPanel = () => {
       },
     });
     setSendingBroadcast(false);
-    const payload = data as { error?: string; sent?: number; failed?: number; total?: number } | null;
+    const payload = data as { error?: string; sent?: number; failed?: number; total?: number; error_detail?: string | null } | null;
     if (error || payload?.error) return toast.error(payload?.error ?? 'Could not send broadcast');
-    toast.success(`Sent to ${payload?.sent ?? 0} of ${payload?.total ?? 0} recipients${payload?.failed ? ` (${payload.failed} failed)` : ''}`);
+    const sent = payload?.sent ?? 0;
+    const total = payload?.total ?? 0;
+    const failed = payload?.failed ?? 0;
+    const summary = `Sent to ${sent} of ${total} recipients${failed ? ` (${failed} failed)` : ''}`;
+    if (sent === 0 && total > 0) {
+      toast.error(payload?.error_detail ? `${summary} — ${payload.error_detail}` : summary);
+    } else if (failed > 0) {
+      toast.warning(payload?.error_detail ? `${summary} — ${payload.error_detail}` : summary);
+    } else {
+      toast.success(summary);
+    }
     setBroadcastForm(emptyBroadcast);
     void loadBroadcasts();
   };
@@ -715,6 +725,9 @@ const AdminPanel = () => {
                 <p className="text-xs text-muted-foreground mt-1">
                   {b.audience_type.replace('_', ' ')} · {b.recipient_count} sent{b.failed_count > 0 && `, ${b.failed_count} failed`} · {formatDateTime(b.created_at)}
                 </p>
+                {b.error && b.status !== 'sent' && (
+                  <p className="text-xs text-destructive mt-1">{b.error}</p>
+                )}
               </div>
             ))}
           </div>

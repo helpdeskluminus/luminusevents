@@ -228,7 +228,7 @@ Deno.serve(async (req) => {
       error: failed > 0 ? `${failed} of ${emails.length} failed to send${lastError ? ` — ${lastError}` : ""}` : null,
     });
 
-    return json({ success: status !== "failed", sent: ok, failed, total: emails.length });
+    return json({ success: status !== "failed", sent: ok, failed, total: emails.length, error_detail: failed > 0 ? lastError ?? null : null });
   } catch (e) {
     console.error(e);
     return json({ error: "Unexpected error" }, 500);
