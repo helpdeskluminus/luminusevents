@@ -6,7 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/qr.ts";
 
 const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
-const VALID_ROLES = ["admin", "disciplinary", "event_oc"];
+const VALID_ROLES = ["admin", "disciplinary", "event_oc", "gate_staff"];
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -116,7 +116,7 @@ Deno.serve(async (req) => {
     if (fullName.length < 2 || fullName.length > 120) errors.push("Name must be 2-120 characters");
     if (!isEmail(email)) errors.push("A valid email is required");
     if (password.length < 10) errors.push("Password must be at least 10 characters");
-    if (!["admin", "disciplinary", "event_oc"].includes(role)) errors.push("Invalid role");
+    if (!VALID_ROLES.includes(role)) errors.push("Invalid role");
     if (role === "event_oc" && !/^[0-9a-f-]{36}$/i.test(competitionId ?? "")) errors.push("Event OC accounts need a competition");
     if (errors.length) return json({ error: errors.join(". ") }, 400);
 
