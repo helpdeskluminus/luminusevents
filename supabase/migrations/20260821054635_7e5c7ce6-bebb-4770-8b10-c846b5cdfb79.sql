@@ -1,0 +1,3 @@
+DELETE FROM public.checkins WHERE registration_id IN (SELECT r.id FROM public.registrations r JOIN public.participants p ON p.id=r.participant_id WHERE lower(p.email)='helpdesk.luminus@gmail.com');
+DELETE FROM public.registrations WHERE participant_id IN (SELECT id FROM public.participants WHERE lower(email)='helpdesk.luminus@gmail.com');
+DELETE FROM public.participants WHERE lower(email)='helpdesk.luminus@gmail.com';
