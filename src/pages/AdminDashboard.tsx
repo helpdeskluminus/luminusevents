@@ -792,8 +792,8 @@ const AdminPanel = () => {
 
           <div className="space-y-3">
             {staff.map((s) => (
-              <div key={s.user_id} className="rounded-2xl border border-border bg-card p-5 flex items-center justify-between gap-3">
-                <div>
+              <div key={s.user_id} className="rounded-2xl border border-border bg-card p-5 flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
                   <p className="font-medium">{s.profiles?.full_name ?? 'Unnamed'}</p>
                   {s.profiles?.position && <p className="text-xs text-muted-foreground">{s.profiles.position}</p>}
                   <p className="text-xs text-muted-foreground">{s.profiles?.email}</p>
@@ -801,6 +801,15 @@ const AdminPanel = () => {
                     {s.role.replace('_', ' ')}
                     {s.competition_id && ` · ${competitions.find((c) => c.id === s.competition_id)?.name ?? ''}`}
                   </p>
+                  {s.role === 'event_oc' && (
+                    <div className="mt-3 space-y-1">
+                      <Label className="text-[10px] font-semibold tracking-wider uppercase text-muted-foreground">Assigned competition</Label>
+                      <Select value={s.competition_id ?? ''} onValueChange={(v) => reassignStaff(s.user_id, v)}>
+                        <SelectTrigger className="h-9"><SelectValue placeholder="Select competition" /></SelectTrigger>
+                        <SelectContent>{competitions.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
                 <Button variant="ghost" size="icon" onClick={() => deleteStaff(s.user_id)} aria-label="Remove account">
                   <Trash2 className="h-4 w-4 text-destructive" />
@@ -808,6 +817,7 @@ const AdminPanel = () => {
               </div>
             ))}
           </div>
+
           </div>
         </TabsContent>
       </Tabs>
