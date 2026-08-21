@@ -31,6 +31,7 @@ const CompetitionDetail = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [ticketCode, setTicketCode] = useState<string | null>(null);
+  const [emailSent, setEmailSent] = useState<boolean>(true);
   const [form, setForm] = useState({ name: '', email: '', phone: '', organization: '' });
 
   useEffect(() => {
@@ -67,6 +68,7 @@ const CompetitionDetail = () => {
     }
     const payload = data as { ticket_code: string; email_sent?: boolean };
     setTicketCode(payload.ticket_code);
+    setEmailSent(payload.email_sent !== false);
     toast.success(
       payload.email_sent === false
         ? 'Registered! Save your ticket code below — the email could not be sent right now.'
@@ -135,9 +137,20 @@ const CompetitionDetail = () => {
               <div className="rounded-2xl border border-border bg-card p-8 text-center">
                 <CheckCircle2 className="h-10 w-10 mx-auto text-primary mb-4" />
                 <h2 className="font-heading text-xl font-semibold">You're registered</h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Your QR ticket has been emailed to <strong>{form.email}</strong>. Show it at the main gate and at the venue.
-                </p>
+                {emailSent ? (
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Your QR ticket has been emailed to <strong>{form.email}</strong>. Show it at the main gate and at the venue.
+                  </p>
+                ) : (
+                  <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-4 text-left">
+                    <p className="text-sm font-medium text-amber-900">We couldn't email your ticket right now.</p>
+                    <p className="mt-1 text-xs text-amber-800 leading-relaxed">
+                      Your registration is confirmed — save the ticket code below and show it at the main gate.
+                      We'll retry sending it to <strong>{form.email}</strong>; if it still hasn't arrived closer to the
+                      event, contact the organisers with this code.
+                    </p>
+                  </div>
+                )}
                 <p className="mt-6 text-[11px] tracking-[0.2em] uppercase text-muted-foreground">Ticket code</p>
                 <p className="font-heading text-2xl font-bold tracking-widest">{ticketCode}</p>
               </div>
