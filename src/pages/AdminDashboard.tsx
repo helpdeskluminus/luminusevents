@@ -287,7 +287,18 @@ const AdminPanel = () => {
     void loadStructure();
   };
 
+  const reassignStaff = async (userId: string, competitionId: string) => {
+    const { data, error } = await supabase.functions.invoke('create-staff-user', {
+      body: { action: 'assign', user_id: userId, competition_id: competitionId },
+    });
+    const payload = data as { error?: string } | null;
+    if (error || payload?.error) return toast.error(payload?.error ?? 'Could not reassign competition');
+    toast.success('Competition reassigned');
+    void loadStructure();
+  };
+
   const deleteStaff = async (userId: string) => {
+
     const { data, error } = await supabase.functions.invoke('create-staff-user', { body: { action: 'delete', user_id: userId } });
     const payload = data as { error?: string } | null;
     if (error || payload?.error) return toast.error(payload?.error ?? 'Could not delete account');
