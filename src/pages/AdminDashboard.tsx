@@ -12,10 +12,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { Helmet } from 'react-helmet-async';
 import { formatDateTime } from '@/lib/format';
-import { Trash2, Sparkles, Upload } from 'lucide-react';
+import { Trash2, Sparkles, Upload, Loader2 } from 'lucide-react';
 import { BulkUploadDialog } from '@/components/BulkUploadDialog';
 import { AddParticipantDialog } from '@/components/AddParticipantDialog';
 import { CoverImageGallery } from '@/components/CoverImageGallery';
+import { EmailStatusCell } from '@/components/EmailStatusCell';
+import { resendTicketEmail } from '@/lib/resendTicketEmail';
 import { SESSION_TYPES, sessionTypeLabel } from '@/lib/sessionType';
 
 interface EventRow { id: string; name: string; description: string | null; banner_url: string | null; start_date: string | null; end_date: string | null; max_gate_scans?: number }
@@ -30,6 +32,14 @@ const emptyStaff = { full_name: '', email: '', password: '', role: 'disciplinary
 const emptyBroadcast = { subject: '', body: '', audience_type: 'all_participants', competition_id: '', emails: '' };
 
 interface BroadcastRow { id: string; subject: string; audience_type: string; competition_id: string | null; recipient_count: number; failed_count: number; status: string; created_at: string; error: string | null }
+interface RegistrationRow {
+  id: string;
+  ticket_code: string;
+  email_sent_at: string | null;
+  created_at: string;
+  competition_id: string;
+  participants: { name: string; email: string; organization: string | null } | null;
+}
 
 const AdminPanel = () => {
   const tick = useLiveTick(['checkins', 'registrations']);
@@ -47,6 +57,11 @@ const AdminPanel = () => {
   const [broadcastForm, setBroadcastForm] = useState(emptyBroadcast);
   const [broadcasts, setBroadcasts] = useState<BroadcastRow[]>([]);
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
+  const [registrations, setRegistrations] = useState<RegistrationRow[]>([]);
+  const [participantQuery, setParticipantQuery] = useState('');
+  const [participantCompFilter, setParticipantCompFilter] = useState('all');
+  const [unsentOnly, setUnsentOnly] = useState(false);
+  const [bulkResending, setBulkResending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingEvent, setEditingEvent] = useState<EventRow | null>(null);
   const [editEventForm, setEditEventForm] = useState(emptyEvent);
@@ -97,6 +112,14 @@ const AdminPanel = () => {
     setBroadcasts((data as BroadcastRow[]) ?? []);
   }, []);
 
+  const loadRegistrations = useCallback(async () => {
+    const { data } = await supabase
+      .from('registrations')
+      .select('id, ticket_code, email_sent_at, created_at, competition_id, participants(name, email, organization)')
+      .order('created_at', { ascending: false });
+    setRegistrations((data as unknown as RegistrationRow[]) ?? []);
+  }, []);
+
   const loadStructure = useCallback(async () => {
     const [{ data: ev }, { data: comps }, { data: roles }, { data: profs }] = await Promise.all([
       supabase.from('events').select('*').order('created_at', { ascending: false }),
@@ -115,7 +138,8 @@ const AdminPanel = () => {
 
     void loadPending();
     void loadBroadcasts();
-  }, [loadPending, loadBroadcasts]);
+    void loadRegistrations();
+  }, [loadPending, loadBroadcasts, loadRegistrations]);
 
   const loadStats = useCallback(async () => {
     const [{ count: gate }, { count: regs }, { data: venueRows }] = await Promise.all([
@@ -377,6 +401,32 @@ const AdminPanel = () => {
     void loadBroadcasts();
   };
 
+  const filteredRegistrations = registrations.filter((r) => {
+    if (participantCompFilter !== 'all' && r.competition_id !== participantCompFilter) return false;
+    if (unsentOnly && r.email_sent_at) return false;
+    const q = participantQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (r.participants?.name ?? '').toLowerCase().includes(q)
+      || (r.participants?.email ?? '').toLowerCase().includes(q)
+      || r.ticket_code.toLowerCase().includes(q);
+  });
+
+  const resendAllPending = async () => {
+    const targets = filteredRegistrations.filter((r) => !r.email_sent_at);
+    if (targets.length === 0) return;
+    if (!window.confirm(`Resend the ticket email to ${targets.length} participant(s) who haven't received it yet?`)) return;
+    setBulkResending(true);
+    let ok = 0, failed = 0;
+    for (const r of targets) {
+      const result = await resendTicketEmail(r.id);
+      if (result.ok) ok++; else failed++;
+    }
+    setBulkResending(false);
+    if (failed === 0) toast.success(`Sent ${ok} ticket email(s)`);
+    else toast.warning(`Sent ${ok}, ${failed} failed — check mail configuration and try again`);
+    void loadRegistrations();
+  };
+
   return (
     <main className="max-w-6xl mx-auto px-6 py-10">
       <Helmet>
@@ -407,6 +457,13 @@ const AdminPanel = () => {
           <TabsTrigger value="live">Live</TabsTrigger>
           <TabsTrigger value="events">Events</TabsTrigger>
           <TabsTrigger value="competitions">Competitions</TabsTrigger>
+          <TabsTrigger value="participants">
+            Participants{registrations.some((r) => !r.email_sent_at) && (
+              <span className="ml-1.5 rounded-full bg-amber-500 text-white text-[10px] px-1.5 py-0.5">
+                {registrations.filter((r) => !r.email_sent_at).length}
+              </span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="broadcast">Broadcast</TabsTrigger>
           <TabsTrigger value="staff">
             Staff{pending.length > 0 && <span className="ml-1.5 rounded-full bg-primary text-primary-foreground text-[10px] px-1.5 py-0.5">{pending.length}</span>}
@@ -667,12 +724,89 @@ const AdminPanel = () => {
           </Dialog>
         </TabsContent>
 
+        <TabsContent value="participants" className="mt-6 space-y-4">
+          <div>
+            <h2 className="font-heading text-lg font-semibold">Ticket delivery</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              Every registration and whether its QR ticket email actually went out. If a participant
+              says they never got their ticket, find them here and hit Resend — no need to re-run a
+              bulk upload or wait for the fest broadcast.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Input
+              value={participantQuery}
+              onChange={(e) => setParticipantQuery(e.target.value)}
+              placeholder="Search by name, email or ticket code"
+              className="flex-1"
+            />
+            <Select value={participantCompFilter} onValueChange={setParticipantCompFilter}>
+              <SelectTrigger className="w-full sm:w-56"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All competitions</SelectItem>
+                {competitions.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => setUnsentOnly((v) => !v)}
+              className={`text-xs font-semibold tracking-wide px-3 py-1.5 rounded-full border transition-colors ${
+                unsentOnly ? 'bg-amber-500/10 border-amber-500/40 text-amber-700' : 'border-border text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {unsentOnly ? 'Showing unsent only' : 'Show unsent only'}
+            </button>
+            {filteredRegistrations.some((r) => !r.email_sent_at) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={bulkResending}
+                onClick={resendAllPending}
+                className="rounded-full text-xs font-semibold tracking-wider"
+              >
+                {bulkResending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
+                {bulkResending ? 'RESENDING…' : `RESEND ALL UNSENT (${filteredRegistrations.filter((r) => !r.email_sent_at).length})`}
+              </Button>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-border bg-card overflow-hidden">
+            <ul className="divide-y divide-border max-h-[560px] overflow-y-auto">
+              {filteredRegistrations.map((r) => (
+                <li key={r.id} className="px-5 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{r.participants?.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {r.participants?.email} · {competitions.find((c) => c.id === r.competition_id)?.name ?? '—'} · #{r.ticket_code}
+                    </p>
+                  </div>
+                  <EmailStatusCell
+                    registrationId={r.id}
+                    emailSentAt={r.email_sent_at}
+                    participantName={r.participants?.name ?? 'this participant'}
+                    onResent={loadRegistrations}
+                  />
+                </li>
+              ))}
+              {filteredRegistrations.length === 0 && (
+                <li className="p-8 text-center text-sm text-muted-foreground">No registrations match.</li>
+              )}
+            </ul>
+          </div>
+        </TabsContent>
+
         <TabsContent value="broadcast" className="mt-6 grid lg:grid-cols-2 gap-6">
           <form onSubmit={sendBroadcast} className="rounded-2xl border border-border bg-card p-6 space-y-4">
             <h2 className="font-heading text-lg font-semibold">Send an email</h2>
             <p className="text-xs text-muted-foreground -mt-2">
               Sent from the same no-reply address as ticket emails. Not for replies — it's a
-              one-way announcement (instructions, schedule changes, reminders, etc).
+              one-way announcement (instructions, schedule changes, reminders, etc). For a single
+              participant's missing ticket, use the Participants tab instead.
             </p>
             <div className="space-y-2">
               <Label>Audience</Label>

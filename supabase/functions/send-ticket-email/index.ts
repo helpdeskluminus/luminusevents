@@ -1,4 +1,4 @@
-// Sends the QR ticket email for a single registration over Gmail SMTP.
+// Sends (or re-sends) the QR ticket email for a single registration over Gmail SMTP.
 //
 // Requires the `GMAIL_USER` and `GMAIL_APP_PASSWORD` secrets (Project Settings -> Secrets).
 // No custom domain is needed — Gmail delivers to any recipient, ~500/day free.
@@ -7,6 +7,13 @@
 // _shared/ticketEmail.ts so bulk-register-participants can reuse it in-process
 // (over one shared SMTP connection) instead of making N HTTP calls to this
 // function, which would each open their own concurrent Gmail connection.
+//
+// Callable two ways:
+//   - in-process from register-participant / bulk-register-participants right
+//     after a registration is created (no auth header - trusted server call)
+//   - over HTTP from the staff dashboard's "Resend ticket email" button, which
+//     DOES require a valid staff session, checked below (admin/disciplinary,
+//     or the event_oc who owns that competition).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders, json } from "../_shared/qr.ts";
 import { MailConfigError, sendMail } from "../_shared/mailer.ts";
@@ -20,6 +27,29 @@ Deno.serve(async (req) => {
     if (!/^[0-9a-f-]{36}$/i.test(registration_id ?? "")) return json({ error: "registration_id required" }, 400);
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+    // A request carrying an Authorization header is a staff dashboard resend -
+    // verify the caller is actually allowed to email this registration's
+    // participant. A request with no header at all is the trusted in-process
+    // call from register-participant/bulk-register-participants right after
+    // creating the registration - nothing to authorise there.
+    const authHeader = req.headers.get("Authorization") || "";
+    if (authHeader.startsWith("Bearer ")) {
+      const anon = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!);
+      const { data: claimsData, error: claimsErr } = await anon.auth.getClaims(authHeader.replace("Bearer ", ""));
+      if (claimsErr || !claimsData?.claims) return json({ error: "Unauthorized" }, 401);
+      const userId = claimsData.claims.sub as string;
+
+      const { data: reg } = await admin.from("registrations").select("competition_id").eq("id", registration_id).maybeSingle();
+      if (!reg) return json({ error: "Registration not found" }, 404);
+
+      const { data: roles } = await admin.from("user_roles").select("role, competition_id").eq("user_id", userId);
+      const roleList = (roles ?? []) as { role: string; competition_id: string | null }[];
+      const authorised = roleList.some((r) =>
+        r.role === "admin" || r.role === "disciplinary" || (r.role === "event_oc" && r.competition_id === reg.competition_id)
+      );
+      if (!authorised) return json({ error: "Not authorised to resend this ticket" }, 403);
+    }
 
     let content;
     try {
