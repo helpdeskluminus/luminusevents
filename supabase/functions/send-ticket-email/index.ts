@@ -1,12 +1,11 @@
-// Sends (or re-sends) the QR ticket email for a single registration over Gmail SMTP.
+// Sends (or re-sends) the QR ticket email for a single registration via Brevo.
 //
-// Requires the `GMAIL_USER` and `GMAIL_APP_PASSWORD` secrets (Project Settings -> Secrets).
-// No custom domain is needed — Gmail delivers to any recipient, ~500/day free.
+// Requires the `BREVO_API_KEY` and `BREVO_SENDER_EMAIL` secrets (Project Settings -> Secrets).
+// No custom domain is needed — Brevo delivers to any recipient, 300/day free.
 //
 // This is a thin HTTP wrapper: the actual content-building logic lives in
 // _shared/ticketEmail.ts so bulk-register-participants can reuse it in-process
-// (over one shared SMTP connection) instead of making N HTTP calls to this
-// function, which would each open their own concurrent Gmail connection.
+// instead of making N separate HTTP calls to this function.
 //
 // Callable two ways:
 //   - in-process from register-participant / bulk-register-participants right
@@ -64,11 +63,11 @@ Deno.serve(async (req) => {
       await sendMail({ to: content.to, subject: content.subject, html: content.html }, `${content.eventName} Tickets`);
     } catch (e) {
       if (e instanceof MailConfigError) {
-        console.warn("Gmail SMTP not configured - ticket email skipped");
+        console.warn("Brevo not configured - ticket email skipped");
         return json({ success: false, skipped: true, reason: e.message, qr_url: content.qrUrl });
       }
-      console.error("Gmail SMTP send failed", e);
-      return json({ error: "Could not send the ticket email over Gmail SMTP", details: String(e), qr_url: content.qrUrl }, 502);
+      console.error("Brevo send failed", e);
+      return json({ error: "Could not send the ticket email", details: String(e), qr_url: content.qrUrl }, 502);
     }
 
     await admin.from("registrations").update({ email_sent_at: new Date().toISOString() }).eq("id", registration_id);

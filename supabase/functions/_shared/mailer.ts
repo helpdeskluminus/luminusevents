@@ -1,14 +1,25 @@
-// Gmail SMTP sender.
+// Brevo (formerly Sendinblue) transactional email sender, over plain HTTPS.
 //
-// We deliberately do NOT use Resend / a hosted email API here: the fest only has
-// a plain Gmail address (no custom domain), and domain-less Resend can only mail
-// the account owner. Gmail SMTP needs no domain verification and delivers to any
-// recipient, within Gmail's free ~500 recipients/day limit.
+// Why not Gmail SMTP: Supabase Edge Functions run on Deno Deploy, which does
+// not reliably support raw outbound TCP/SMTP connections (port 465/587) —
+// sends would hang or fail intermittently no matter how correct the App
+// Password was. Brevo's API is called over HTTPS like any other fetch, so it
+// works from Edge Functions every time.
+//
+// Why not Resend: Resend's free tier can only mail the account owner unless
+// you verify a custom domain. The fest only has a plain Gmail address, no
+// domain. Brevo's free tier lets you verify a single sender EMAIL ADDRESS
+// (no DNS/domain needed) and then send to any recipient, up to 300
+// emails/day for free — same shape of limit as Gmail's ~500/day, no SMTP.
 //
 // Required secrets (Project Settings -> Secrets):
-//   GMAIL_USER          e.g. helpdesk.luminus@gmail.com
-//   GMAIL_APP_PASSWORD  16-character Google App Password (needs 2-Step Verification on)
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+//   BREVO_API_KEY      Create at https://app.brevo.com/settings/keys/api
+//   BREVO_SENDER_EMAIL The address you verified under Senders & IP ->
+//                      Senders in Brevo (e.g. helpdesk.luminus@gmail.com —
+//                      your existing Gmail address works fine here, it just
+//                      needs the one-click verification email Brevo sends)
+//   BREVO_SENDER_NAME  Optional display name, e.g. "Luminus Events"
+const BREVO_ENDPOINT = "https://api.brevo.com/v3/smtp/email";
 
 export interface MailMessage {
   to: string;
@@ -18,88 +29,100 @@ export interface MailMessage {
 
 export class MailConfigError extends Error {}
 
-export function gmailCredentials(): { user: string; password: string } {
-  const user = Deno.env.get("GMAIL_USER");
-  const password = (Deno.env.get("GMAIL_APP_PASSWORD") || "").replace(/\s+/g, "");
-  if (!user || !password) {
+interface MailCreds {
+  apiKey: string;
+  senderEmail: string;
+  senderName?: string;
+}
+
+/** Reads and validates the Brevo secrets. Throws MailConfigError if missing. */
+export function mailCredentials(): MailCreds {
+  const apiKey = Deno.env.get("BREVO_API_KEY");
+  const senderEmail = Deno.env.get("BREVO_SENDER_EMAIL");
+  const senderName = Deno.env.get("BREVO_SENDER_NAME") || undefined;
+  if (!apiKey || !senderEmail) {
     throw new MailConfigError(
-      "Gmail sending isn't configured yet. Add GMAIL_USER (the Gmail address) and GMAIL_APP_PASSWORD (16-character Google App Password) in Project Settings -> Secrets.",
+      "Email sending isn't configured yet. Add BREVO_API_KEY and BREVO_SENDER_EMAIL (the address you verified as a sender in Brevo) in Project Settings -> Secrets.",
     );
   }
-  return { user, password };
+  return { apiKey, senderEmail, senderName };
 }
 
-async function withClient<T>(fn: (client: SMTPClient, from: string) => Promise<T>): Promise<T> {
-  const { user, password } = gmailCredentials();
-  const client = new SMTPClient({
-    connection: {
-      hostname: "smtp.gmail.com",
-      port: 465,
-      tls: true,
-      auth: { username: user, password },
+// Kept for backwards compatibility with older imports; delegates to the
+// current mailCredentials() check.
+export function gmailCredentials(): MailCreds {
+  return mailCredentials();
+}
+
+async function brevoSend(
+  creds: MailCreds,
+  msg: MailMessage,
+  fromName?: string,
+): Promise<void> {
+  const res = await fetch(BREVO_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "api-key": creds.apiKey,
     },
+    body: JSON.stringify({
+      sender: { email: creds.senderEmail, name: fromName || creds.senderName || undefined },
+      to: [{ email: msg.to }],
+      replyTo: { email: creds.senderEmail },
+      subject: msg.subject,
+      htmlContent: msg.html,
+    }),
   });
-  try {
-    return await fn(client, user);
-  } finally {
-    try {
-      await client.close();
-    } catch (_) {
-      // closing is best-effort; the send result is what matters
-    }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Brevo send failed (${res.status}): ${body || res.statusText}`);
   }
 }
 
-/** Send one email. Throws on SMTP failure. */
+/** Send one email. Throws on failure. */
 export async function sendMail(msg: MailMessage, fromName?: string): Promise<void> {
-  await withClient(async (client, user) => {
-    await client.send({
-      from: fromName ? `${fromName} <${user}>` : user,
-      to: msg.to,
-      replyTo: user,
-      subject: msg.subject,
-      content: "auto",
-      html: msg.html,
-    });
-  });
+  const creds = mailCredentials();
+  await brevoSend(creds, msg, fromName);
 }
 
 /**
- * Send several distinct emails (different subject/html per recipient) over a
- * single SMTP connection. Use this instead of calling sendMail() in a loop or
- * firing concurrent unawaited sends - Gmail throttles/rejects past a handful
- * of simultaneous connections, which silently drops mail on bulk sends.
+ * Send several distinct emails (different subject/html per recipient).
+ * Sent with a small concurrency limit — Brevo's API handles concurrent HTTPS
+ * requests fine (unlike Gmail SMTP, which throttles simultaneous connections),
+ * but we still cap it to stay well under rate limits on large batches.
  */
 export async function sendMailBatch(
   items: { to: string; subject: string; html: string }[],
   fromName?: string,
 ): Promise<{ to: string; ok: boolean; error?: string }[]> {
   if (items.length === 0) return [];
-  return await withClient(async (client, user) => {
-    const results: { to: string; ok: boolean; error?: string }[] = [];
-    for (const item of items) {
+  const creds = mailCredentials();
+  const CONCURRENCY = 5;
+  const results: { to: string; ok: boolean; error?: string }[] = new Array(items.length);
+
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++;
+      const item = items[i];
       try {
-        await client.send({
-          from: fromName ? `${fromName} <${user}>` : user,
-          to: item.to,
-          replyTo: user,
-          subject: item.subject,
-          content: "auto",
-          html: item.html,
-        });
-        results.push({ to: item.to, ok: true });
+        await brevoSend(creds, item, fromName);
+        results[i] = { to: item.to, ok: true };
       } catch (e) {
-        console.error("SMTP batch send failed for", item.to, e);
-        results.push({ to: item.to, ok: false, error: String(e) });
+        console.error("Brevo batch send failed for", item.to, e);
+        results[i] = { to: item.to, ok: false, error: String(e) };
       }
     }
-    return results;
-  });
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, items.length) }, worker));
+  return results;
 }
 
 /**
- * Send the same email to many recipients over a single SMTP connection.
- * Each recipient gets their own message (no shared To: header).
+ * Send the same email to many recipients. Each recipient gets their own
+ * message (no shared To: header, no exposed recipient list).
  */
 export async function sendBulkMail(
   recipients: string[],
@@ -108,25 +131,12 @@ export async function sendBulkMail(
   fromName?: string,
 ): Promise<{ ok: number; failed: number; lastError?: string }> {
   if (recipients.length === 0) return { ok: 0, failed: 0 };
-  return await withClient(async (client, user) => {
-    let ok = 0, failed = 0, lastError: string | undefined;
-    for (const to of recipients) {
-      try {
-        await client.send({
-          from: fromName ? `${fromName} <${user}>` : user,
-          to,
-          replyTo: user,
-          subject,
-          content: "auto",
-          html,
-        });
-        ok++;
-      } catch (e) {
-        failed++;
-        lastError = String(e);
-        console.error("SMTP send failed for", to, e);
-      }
-    }
-    return { ok, failed, lastError };
-  });
+  const results = await sendMailBatch(
+    recipients.map((to) => ({ to, subject, html })),
+    fromName,
+  );
+  const ok = results.filter((r) => r.ok).length;
+  const failed = results.length - ok;
+  const lastError = results.find((r) => !r.ok)?.error;
+  return { ok, failed, lastError };
 }

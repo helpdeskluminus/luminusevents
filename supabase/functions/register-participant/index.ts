@@ -139,7 +139,7 @@ Deno.serve(async (req) => {
       } catch (e) {
         if (e instanceof MailConfigError) {
           emailSkippedReason = e.message;
-          console.warn("ticket email skipped - Gmail SMTP not configured");
+          console.warn("ticket email skipped - Brevo not configured");
         } else {
           console.error("ticket email send failed", e);
         }

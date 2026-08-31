@@ -99,21 +99,33 @@ so they can't drift out of sync with each other.
 
 ## Ticket emails
 
-Sent via [Resend](https://resend.com) from `send-ticket-email`, styled like
-a real event ticket: event/competition poster image, attendee name, venue,
-date/time, ticket code, and an embedded QR code image (rendered server-side
-and stored in the public `event-images` bucket so email clients can load
-it). Requires two Edge Function secrets to actually deliver:
+Sent via [Brevo](https://www.brevo.com)'s transactional email HTTP API from
+`send-ticket-email`, styled like a real event ticket: event/competition
+poster image, attendee name, venue, date/time, ticket code, and an embedded
+QR code image (rendered server-side and stored in the public `event-images`
+bucket so email clients can load it).
 
-- `RESEND_API_KEY`
-- `FROM_EMAIL` — e.g. `"Luminus Events <no-reply@yourdomain.com>"`, using a
-  domain verified in Resend. Without this it falls back to Resend's sandbox
-  address, which is fine for testing but will not reliably land in inboxes
-  for a real fest.
+Brevo was chosen over Gmail SMTP and over domain-less Resend specifically:
+Gmail SMTP needs a raw TCP connection, and Supabase Edge Functions (Deno
+Deploy) don't reliably support that — sends would hang or fail no matter how
+correct the App Password was. Resend's free tier can only mail the account
+owner unless you verify a full custom domain, which a plain-Gmail fest
+doesn't have. Brevo's free tier only needs a single **sender email address**
+verified (no DNS/domain setup), sends to any recipient, is called over
+plain HTTPS so it works from Edge Functions, and gives 300 emails/day free.
 
-If `RESEND_API_KEY` isn't set, the function logs a warning and returns
+Requires two Edge Function secrets (Project Settings -> Secrets) to
+actually deliver:
+
+- `BREVO_API_KEY` — create at https://app.brevo.com/settings/keys/api
+- `BREVO_SENDER_EMAIL` — the address you verify under Brevo's
+  **Senders, Domains & Dedicated IPs -> Senders** (your existing Gmail
+  address works fine here; Brevo just emails you a one-click confirmation
+  link). Optionally also set `BREVO_SENDER_NAME` for the display name.
+
+If these aren't set, the function logs a warning and returns
 `{ skipped: true }` rather than failing registration — but the participant
-won't receive a ticket, so confirm this secret is set before go-live.
+won't receive a ticket, so confirm these secrets are set before go-live.
 
 ## Security model
 
@@ -132,9 +144,13 @@ won't receive a ticket, so confirm this secret is set before go-live.
   server-side on every scan — never trusted from the request body.
 
 **Still your responsibility before a real event:**
-- Confirm `RESEND_API_KEY` / `FROM_EMAIL` are set (see above).
-- SPF/DKIM/DMARC configured for your sending domain in Resend, or mail will
-  land in spam.
+- Confirm `BREVO_API_KEY` / `BREVO_SENDER_EMAIL` are set (see above), and that
+  the sender address has clicked Brevo's verification email.
+- Send a few real test emails and check they don't land in spam. Since this
+  setup piggybacks on a plain Gmail address rather than a verified custom
+  domain, deliverability is good but not guaranteed the way SPF/DKIM/DMARC
+  on your own domain would be — if you later get a domain, verify it in
+  Brevo for better inbox placement.
 - No system is "unhackable" — this avoids the common high-impact mistakes
   (unscoped data access, client-trusted roles, guessable tickets), but get
   someone to review it before it's load-bearing for a real fest.

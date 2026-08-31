@@ -69,12 +69,12 @@ Deno.serve(async (req) => {
       existingCount = count ?? 0;
     }
 
-    const emailsConfigured = !!Deno.env.get("GMAIL_USER") && !!Deno.env.get("GMAIL_APP_PASSWORD");
+    const emailsConfigured = !!Deno.env.get("BREVO_API_KEY") && !!Deno.env.get("BREVO_SENDER_EMAIL");
     const results: { row: number; email: string; status: "registered" | "duplicate" | "error"; message?: string; ticket_code?: string }[] = [];
-    // Registered rows queue up here for a single batched SMTP send after the
-    // loop, instead of each row firing its own unawaited HTTP call to
-    // send-ticket-email - Gmail throttles/rejects past a handful of
-    // concurrent SMTP connections, which was silently dropping tickets.
+    // Registered rows queue up here for a single batched send after the loop,
+    // instead of each row firing its own unawaited HTTP call to
+    // send-ticket-email - a shared worker pool keeps this from tripping
+    // Brevo's rate limits, which was silently dropping tickets.
     const pendingEmails: { row: number; registrationId: string; email: string }[] = [];
     let registeredCount = 0;
 
@@ -154,18 +154,17 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ---- Send all queued ticket emails over one shared SMTP connection ----
+    // ---- Send all queued ticket emails via Brevo (small worker pool) ----
     let emailsSent = 0, emailsFailed = 0;
     if (sendEmails && pendingEmails.length > 0) {
       if (!emailsConfigured) {
         for (const pending of pendingEmails) {
           const r = results.find((res) => res.row === pending.row);
-          if (r) r.message = (r.message ? `${r.message}; ` : "") + "Registered, but email not sent - Gmail sending isn't configured yet";
+          if (r) r.message = (r.message ? `${r.message}; ` : "") + "Registered, but email not sent - email sending isn't configured yet";
         }
       } else {
-        // Building QR PNGs/HTML can happen concurrently (no shared SMTP
-        // connection needed for this part); only the actual send is serialised
-        // over one connection.
+        // Building QR PNGs/HTML can happen concurrently; sendMailBatch applies
+        // its own small worker pool for the actual sends.
         const built = await Promise.all(
           pendingEmails.map(async (pending) => {
             try {

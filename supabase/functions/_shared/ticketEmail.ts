@@ -1,10 +1,9 @@
 // Builds the ticket email (QR PNG + HTML) for a registration. Shared by
 // send-ticket-email (the HTTP-callable single-ticket path) and
-// bulk-register-participants (which sends many of these over one SMTP
-// connection in-process, rather than firing N unawaited HTTP calls that would
-// each open their own concurrent Gmail SMTP connection - Gmail throttles/
-// rejects past a handful of those, which silently drops tickets on bulk
-// uploads).
+// bulk-register-participants (which sends many of these in-process via a
+// small worker pool, rather than firing N unawaited HTTP calls that would
+// each hit Brevo's API independently with no shared concurrency control -
+// which could trip rate limits and silently drop tickets on bulk uploads).
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import QRCode from "https://esm.sh/qrcode@1.5.4";
 

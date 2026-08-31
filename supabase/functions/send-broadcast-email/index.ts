@@ -1,8 +1,8 @@
 // Admin-only: send an arbitrary, admin-authored email (instructions, updates, etc.)
-// to a chosen audience, from the fest's Gmail address over SMTP.
+// to a chosen audience, via Brevo's HTTPS email API.
 // Every send is logged to public.email_broadcasts for audit purposes.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { MailConfigError, gmailCredentials, sendBulkMail } from "../_shared/mailer.ts";
+import { MailConfigError, mailCredentials, sendBulkMail } from "../_shared/mailer.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -178,13 +178,13 @@ Deno.serve(async (req) => {
     emails = Array.from(new Set(emails));
 
     if (emails.length === 0) return json({ error: "No recipients matched this audience" }, 400);
-    // Gmail's free sending cap is ~500 recipients/day, so a single broadcast can't exceed it.
-    if (emails.length > 500) {
-      return json({ error: `This audience has ${emails.length} recipients — Gmail allows about 500 emails per day. Narrow the audience down.` }, 400);
+    // Brevo's free sending cap is 300 emails/day, so a single broadcast can't exceed it.
+    if (emails.length > 300) {
+      return json({ error: `This audience has ${emails.length} recipients — the free email plan allows about 300 emails per day. Narrow the audience down.` }, 400);
     }
 
     try {
-      gmailCredentials();
+      mailCredentials();
     } catch (e) {
       const reason = e instanceof MailConfigError ? e.message : String(e);
       await admin.from("email_broadcasts").insert({
